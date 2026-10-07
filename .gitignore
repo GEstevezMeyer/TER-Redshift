@@ -5,3 +5,5 @@ myenv/
 
 .agents/
 .rules
+
+__pycache__/
