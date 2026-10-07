@@ -1,4 +1,7 @@
 data/
-myenv/
 Ressources/
+
+myenv/
+
 .agents/
+.rules
