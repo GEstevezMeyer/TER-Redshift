@@ -121,7 +121,7 @@ class ChoquetInterval(torch.nn.Module):
 
 
 
-class Test(nn.Module):
+class ChoquetIntervallArchitecture(nn.Module):
     def __init__(self, n_in: int, layer_dense: list[int], activation_function: Callable | list[Callable]):
         super().__init__()
         self.n_in = n_in
@@ -153,13 +153,16 @@ class Test(nn.Module):
 if __name__ == "__main__": 
     
     import torch.nn.functional as F
-    model = Test(n_in=3, layer_dense=[4, 8, 1], activation_function=F.relu)
+    model = ChoquetIntervallArchitecture(n_in=3, layer_dense=[4, 8, 1], activation_function=F.tanh)
     x = torch.rand(5, 3)          
 
     minimum, maximum = model(x)
 
-    print("minimum:", minimum.shape)   
-    print("maximum:", maximum.shape)   
+    print(f"x : {x}")
+    print(f"minimum : {minimum}")
+    print(f"maximum : {maximum}")
+    print("minimum.shape:", minimum.shape)   
+    print("maximum.shape:", maximum.shape)   
     print("min <= max:", bool(torch.all(minimum <= maximum)))   
 
     (minimum.sum() + maximum.sum()).backward()
