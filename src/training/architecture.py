@@ -6,6 +6,8 @@
 import torch 
 from torch import Tensor
 import torch.nn as nn 
+import torch.nn.functional as F
+from typing import Callable
 
 from src.utils.configs import return_device
 
@@ -40,7 +42,7 @@ def subset_to_indices(indices: Tensor) -> list[Tensor]:
     return [i for i in indices]
 
 
-class NeuroneChoquet(nn.Module):
+class Choquet_integral(nn.Module):
     
     N_in: int
     N_out: int
@@ -102,9 +104,63 @@ class NeuroneChoquet(nn.Module):
 
         return FM
 
+class ChoquetInterval(torch.nn.Module):
+    def __init__(self, N_in, N_out):
+        super().__init__()
+
+        self.a = Choquet_integral(N_in, N_out)
+        self.b = Choquet_integral(N_in, N_out)
+
+    def forward(self, x:Tensor) -> tuple[Tensor,Tensor]:
+        lower = self.a(x)
+        upper = lower + nn.functional.softplus(self.b(x))
+
+        return upper, lower
+
+    
+    
+    
+    class ChoquetIntervallArchitecture(nn.Module):
+        def __init__(self, n_in: int, layer_dense: list[int], activation_function: Callable | list[Callable]):
+            super().__init__()
+            self.n_in = n_in
+            self.layers_dense = layer_dense
+            self.n = len(layer_dense)
+
+            self.ChoquetInterval = ChoquetInterval(self.n_in, self.layers_dense[0])
+            self.Layers_dense = nn.ModuleList([nn.Linear(self.layers_dense[i], self.layers_dense[i+1]) for i in range(self.n-1)])
+            self.activation_function = [activation_function for _ in range(self.n-1)] if callable(activation_function) else activation_function
+
+        def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+            x_upper, x_lower = self.ChoquetInterval(x)
+
+            for layer, act in zip(self.Layers_dense, self.activation_function):
+                x_upper = act(layer(x_upper))
+                x_lower = act(layer(x_lower))
+
+            minimum = torch.minimum(x_upper, x_lower)
+            maximum = torch.maximum(x_lower, x_upper)
+
+            return minimum, maximum
+
 
 
 
 
 if __name__ == "__main__": 
-    pass
+    import torch.nn.functional as F
+    model = ChoquetIntervallArchitecture(n_in=3, layer_dense=[4, 8, 1], activation_function=F.tanh)
+    x = torch.rand(5, 3)          
+
+    minimum, maximum = model(x)
+
+    print(f"x : {x}")
+    print(f"minimum : {minimum}")
+    print(f"maximum : {maximum}")
+    print("minimum.shape:", minimum.shape)   
+    print("maximum.shape:", maximum.shape)   
+    print("min <= max:", bool(torch.all(minimum <= maximum)))   
+
+    (minimum.sum() + maximum.sum()).backward()
+    print("gradientes OK:", all(p.grad is not None for p in model.parameters()))
+
