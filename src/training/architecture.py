@@ -143,6 +143,20 @@ class ChoquetIntervallArchitecture(nn.Module):
         maximum = torch.maximum(x_lower, x_upper)
 
         return minimum, maximum
+
+    def plot_model(self, input_size: int, save: bool = False, save_path: str = "architecture_graph.pdf"):
+        try:
+            from torchviz import make_dot
+            x = torch.rand(1, input_size)
+            y = self.forward(x)
+            dot = make_dot(y, params=dict(self.named_parameters()))
+            if save:
+                dot.render(save_path, format="pdf")
+                print(f"Architecture graph saved to {save_path}")
+            else:
+                print(dot)
+        except ImportError:
+            print("Please install torchviz and graphviz to use plot_model: pip install torchviz graphviz")
         
         
 
