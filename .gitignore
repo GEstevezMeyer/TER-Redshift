@@ -3,3 +3,5 @@ myenv/
 __pycache__/
 *.py[cod]
 *$py.class
+Digraph.gv
+Digraph.gv.pdf

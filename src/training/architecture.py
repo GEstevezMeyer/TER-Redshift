@@ -1,183 +1,103 @@
-# Reference:
-# Code Ocean, Capsule 8551785, v1.
-# https://codeocean.com/capsule/8551785/tree/v1
-
-
 import torch 
 from torch import Tensor
 import torch.nn as nn 
 import torch.nn.functional as F
-from typing import Callable
 
-from src.utils.configs import return_device
-
-def sources_and_subsets_nodes(N: int) -> tuple[list[list[int]], list[list[int]]]:
-    str1: str = "{0:{fill}" + str(N) + "b}"
-    a: list[str] = []
-    for i in range(1, 2**N):
-        a.append(str1.format(i, fill='0'))
-
-    sourcesInNode: list[list[int]] = []
-    sourcesNotInNode: list[list[int]] = []
-    subset: list[list[int]] = []
-    sourceList: list[int] = list(range(N))
-
-    def node_subset(node: int, sourcesInNodes: list[int]) -> list[int]:
-        return [node - 2**i for i in sourcesInNodes]
-
-    def string_to_integer_array(s: str, ch: str) -> list[int]:
-        N = len(s)
-        return [(N - i - 1) for i, ltr in enumerate(s) if ltr == ch]
-
-    for j in range(len(a)):
-        idxLR = string_to_integer_array(a[j], '1')
-        sourcesInNode.append(idxLR)
-        sourcesNotInNode.append(list(set(sourceList) - set(idxLR)))
-        subset.append(node_subset(j, idxLR))
-
-    return sourcesInNode, subset
-
-
-def subset_to_indices(indices: Tensor) -> list[Tensor]:
-    return [i for i in indices]
-
-
-class Choquet_integral(nn.Module):
-    
-    N_in: int
-    N_out: int
-    nVars: int
-    mu: nn.Parameter
-    sourcesInNode: list[Tensor]
-    subset: list[Tensor]
-    FM: Tensor
-
-    def __init__(self, N_in: int, N_out: int) -> None:
-        super().__init__()
-
-        self.N_in = N_in
-        self.N_out = N_out
-        self.nVars = 2**self.N_in - 2
-
-        dummy: Tensor = (1 / self.N_in) * torch.ones((self.nVars, self.N_out), requires_grad=True)
-        self.mu = nn.Parameter(dummy)
-
-        sources_lists, subset_lists = sources_and_subsets_nodes(self.N_in)
-        self.sourcesInNode = [torch.tensor(x) for x in sources_lists]
-        self.subset = [torch.tensor(x) for x in subset_lists]
-
-    def forward(self, inputs: Tensor) -> Tensor:
-        self.FM = self.chi_nn_mu(self.mu)
-        sortInputs: Tensor
-        sortInd: Tensor
-        sortInputs, sortInd = torch.sort(inputs, 1, True)
-        M, N = inputs.size()
-        sortInputs = torch.cat((sortInputs, torch.zeros(M, 1)), 1)
-        sortInputs = sortInputs[:, :-1] - sortInputs[:, 1:]
-
-        out: Tensor = torch.cumsum(torch.pow(2, sortInd), 1) - torch.ones(1, dtype=torch.int64)
-
-        data: Tensor = torch.zeros((M, self.nVars + 1))
-
-        for i in range(M):
-            data[i, out[i, :]] = sortInputs[i, :]
-
-        ChI: Tensor = torch.matmul(data, self.FM)
-
-        return ChI
-
-    def chi_nn_mu(self, chi_mu: Tensor) -> Tensor:
-        chi_mu = torch.abs(chi_mu)
-
-        FM: Tensor = chi_mu[None, 0, :]
-        for i in range(1, self.nVars):
-            indices: list[Tensor] = subset_to_indices(self.subset[i])
-            if len(indices) == 1:
-                FM = torch.cat((FM, chi_mu[None, i, :]), 0)
-            else:
-                maxVal, _ = torch.max(FM[indices, :], 0)
-                temp: Tensor = torch.add(maxVal, chi_mu[i, :])
-                FM = torch.cat((FM, temp[None, :]), 0)
-
-        FM = torch.cat([FM, torch.ones((1, self.N_out))], 0)
-        FM = torch.min(FM, torch.ones(1))
-
-        return FM
-
-class ChoquetInterval(torch.nn.Module):
-    def __init__(self, N_in, N_out):
-        super().__init__()
-
-        self.a = Choquet_integral(N_in, N_out)
-        self.b = Choquet_integral(N_in, N_out)
-
-    def forward(self, x:Tensor) -> tuple[Tensor,Tensor]:
-        lower = self.a(x)
-        upper = lower + nn.functional.softplus(self.b(x))
-
-        return upper, lower
-
-    
-
-
-
-class ChoquetIntervallArchitecture(nn.Module):
-    def __init__(self, n_in: int, layer_dense: list[int], activation_function: Callable | list[Callable]):
+class NeuroneMacSum(nn.Module):
+    def __init__(self, n_in, n_out):
         super().__init__()
         self.n_in = n_in
-        self.layers_dense = layer_dense
-        self.n = len(layer_dense)
-
-        self.ChoquetInterval = ChoquetInterval(self.n_in, self.layers_dense[0])
-        self.Layers_dense = nn.ModuleList([nn.Linear(self.layers_dense[i], self.layers_dense[i+1]) for i in range(self.n-1)])
-        self.activation_function = [activation_function for _ in range(self.n-1)] if callable(activation_function) else activation_function
+        self.n_out = n_out
+        self.parametres = nn.Parameter(torch.rand(self.n_out, self.n_in))   
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
-        x_upper, x_lower = self.ChoquetInterval(x)
 
-        for layer, act in zip(self.Layers_dense, self.activation_function):
-            x_upper = act(layer(x_upper))
-            x_lower = act(layer(x_lower))
+        x_decroissante, _ = torch.sort(x, descending=True)
+        x_croissante, _ = torch.sort(x, descending=False)
+        liste_y_low = []
+        liste_y_sup = []
 
-        minimum = torch.minimum(x_upper, x_lower)
-        maximum = torch.maximum(x_lower, x_upper)
+        for j in range(self.n_out):
+            _, i_parameters_decroissante = torch.sort(self.parametres[j], descending=True)
+            _, i_parameters_croissante = torch.sort(self.parametres[j], descending=False)
+            y_sup = 0
+            y_low = 0
 
-        return minimum, maximum
+            for k in range(0, self.n_in):
+                difference_plus = torch.clamp(self.parametres[j, i_parameters_decroissante[k]], min=0) \
+                    - (torch.clamp(self.parametres[j, i_parameters_decroissante[k+1]], min=0) if k + 1 < self.n_in else 0)
+                difference_moin = torch.clamp(self.parametres[j, i_parameters_croissante[k]], max=0) \
+                    - (torch.clamp(self.parametres[j, i_parameters_croissante[k+1]], max=0) if k + 1 < self.n_in else 0)
 
-    def plot_model(self, input_size: int, save: bool = False, save_path: str = "architecture_graph.pdf"):
-        try:
-            from torchviz import make_dot
-            x = torch.rand(1, input_size)
-            y = self.forward(x)
-            dot = make_dot(y, params=dict(self.named_parameters()))
-            if save:
-                dot.render(save_path, format="pdf")
-                print(f"Architecture graph saved to {save_path}")
-            else:
-                print(dot)
-        except ImportError:
-            print("Please install torchviz and graphviz to use plot_model: pip install torchviz graphviz")
-        
-        
+                x_k_decroissante = x_decroissante[:k+1]
+                x_k_croissante = x_croissante[:k+1]
+
+                x_k_decroissante_plus = torch.clamp(x_k_decroissante, min=0)
+                x_k_decroissante_moin = torch.clamp(x_k_decroissante, max=0)
+                x_k_croissante_plus = torch.clamp(x_k_croissante, min=0)
+                x_k_croissante_moin = torch.clamp(x_k_croissante, max=0)
+
+                beta_sup = x_k_decroissante_plus.max() + x_k_decroissante_moin.max()
+                beta_low = (-x_k_decroissante_plus).max() + (-x_k_decroissante_moin).max()
+                gamma_sup = x_k_croissante_plus.min() + x_k_croissante_moin.min()
+                gamma_low = (-x_k_croissante_plus).min() + (-x_k_croissante_moin).min()
+
+                y_sup += difference_plus*beta_sup + difference_moin*gamma_sup
+                y_low += -(difference_plus*beta_low + difference_moin*gamma_low)
+
+            liste_y_low.append(y_low)
+            liste_y_sup.append(y_sup)
+
+        return torch.stack(liste_y_low), torch.stack(liste_y_sup)  
+
+class MacSumArchitecture(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self,x):
+        pass
+            
+
+
+
 
 
 
 
 
 if __name__ == "__main__": 
-    
-    import torch.nn.functional as F
-    model = ChoquetIntervallArchitecture(n_in=3, layer_dense=[4, 8, 1], activation_function=F.tanh)
-    x = torch.rand(5, 3)          
 
-    minimum, maximum = model(x)
+    torch.manual_seed(0)
 
-    print(f"x : {x}")
-    print(f"minimum : {minimum}")
-    print(f"maximum : {maximum}")
-    print("minimum.shape:", minimum.shape)   
-    print("maximum.shape:", maximum.shape)   
-    print("min <= max:", bool(torch.all(minimum <= maximum)))   
+    n_in = 5
+    n_out = 3   # plus parlant que 1 pour vérifier les formes
+    neurone = NeuroneMacSum(n_in, n_out)
+    x = torch.tensor([0.5, -1.0, 2.0, -0.3, 1.5])
 
-    (minimum.sum() + maximum.sum()).backward()
-    print("gradientes OK:", all(p.grad is not None for p in model.parameters()))
+    y_low, y_sup = neurone(x)
+    print("y_low :", y_low)
+    print("y_sup :", y_sup)
+
+    # 2. Formes : un scalaire par neurone de sortie
+    assert y_low.shape == (n_out,) and y_sup.shape == (n_out,)
+
+    # 3. Cohérence : la borne basse doit être <= la borne haute (pour chaque sortie)
+    print("y_low <= y_sup :", (y_low <= y_sup).all().item())
+
+    # 4. Backward : .sum() car loss doit être un scalaire
+    loss = (y_sup - y_low).sum()
+    loss.backward()
+    print("grad :", neurone.parametres.grad)
+    assert neurone.parametres.grad is not None
+    assert neurone.parametres.grad.shape == (n_out, n_in)
+
+    # 5. Mini entraînement
+    opt = torch.optim.Adam(neurone.parameters(), lr=0.05)
+    for epoch in range(50):
+        opt.zero_grad()
+        y_low, y_sup = neurone(x)
+        loss = ((y_sup - 1.0) ** 2 + (y_low + 1.0) ** 2).sum()
+        loss.backward()
+        opt.step()
+        if epoch % 10 == 0:
+            print(f"epoch {epoch:2d} | loss {loss.item():.4f}")
