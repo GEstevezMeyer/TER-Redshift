@@ -120,23 +120,23 @@ class ChoquetInterval(torch.nn.Module):
     
     
     
-    class ChoquetIntervallArchitecture(nn.Module):
-        def __init__(self, n_in: int, layer_dense: list[int], activation_function: Callable | list[Callable]):
-            super().__init__()
-            self.n_in = n_in
-            self.layers_dense = layer_dense
-            self.n = len(layer_dense)
+class ChoquetIntervallArchitecture(nn.Module):
+    def __init__(self, n_in: int, layer_dense: list[int], activation_function: Callable | list[Callable]):
+        super().__init__()
+        self.n_in = n_in
+        self.layers_dense = layer_dense
+        self.n = len(layer_dense)
 
-            self.ChoquetInterval = ChoquetInterval(self.n_in, self.layers_dense[0])
-            self.Layers_dense = nn.ModuleList([nn.Linear(self.layers_dense[i], self.layers_dense[i+1]) for i in range(self.n-1)])
-            self.activation_function = [activation_function for _ in range(self.n-1)] if callable(activation_function) else activation_function
+        self.ChoquetInterval = ChoquetInterval(self.n_in, self.layers_dense[0])
+        self.Layers_dense = nn.ModuleList([nn.Linear(self.layers_dense[i], self.layers_dense[i+1]) for i in range(self.n-1)])
+        self.activation_function = [activation_function for _ in range(self.n-1)] if callable(activation_function) else activation_function
 
-        def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
-            x_upper, x_lower = self.ChoquetInterval(x)
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        x_upper, x_lower = self.ChoquetInterval(x)
 
-            for layer, act in zip(self.Layers_dense, self.activation_function):
-                x_upper = act(layer(x_upper))
-                x_lower = act(layer(x_lower))
+        for layer, act in zip(self.Layers_dense, self.activation_function):
+            x_upper = act(layer(x_upper))
+            x_lower = act(layer(x_lower))
 
             minimum = torch.minimum(x_upper, x_lower)
             maximum = torch.maximum(x_lower, x_upper)
@@ -149,6 +149,7 @@ class ChoquetInterval(torch.nn.Module):
 
 if __name__ == "__main__": 
     import torch.nn.functional as F
+
     model = ChoquetIntervallArchitecture(n_in=3, layer_dense=[4, 8, 1], activation_function=F.tanh)
     x = torch.rand(5, 3)          
 
