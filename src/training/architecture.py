@@ -55,28 +55,38 @@ class NeuroneMacSum(nn.Module):
         
         squeeze = x.dim() == 1
         if squeeze:
-            x = x.unsqueeze(0)                                   
+            x = x.unsqueeze(0)                                 
 
         w = self.parametres                                      
-        phi_plus  = torch.clamp(torch.sort(w, dim=1, descending=True).values,  min=0)
-        phi_moins = torch.clamp(torch.sort(w, dim=1, descending=False).values, max=0)
 
-        xd = torch.sort(x, dim=1, descending=True).values        
-        xc = torch.sort(x, dim=1, descending=False).values
+      
+        w_dec, _ = torch.sort(w, dim=1, descending=True)
+        w_cro, _ = torch.sort(w, dim=1, descending=False)
+        w_plus = torch.clamp(w_dec, min=0)
+        w_moin = torch.clamp(w_cro, max=0)
+
+       
+        xd, _ = torch.sort(x, dim=1, descending=True)
+        xc, _ = torch.sort(x, dim=1, descending=False)
 
         xd_p, xd_m = torch.clamp(xd, min=0), torch.clamp(xd, max=0)
         xc_p, xc_m = torch.clamp(xc, min=0), torch.clamp(xc, max=0)
 
-        beta_sup  = torch.cummax(xd_p, 1).values  + torch.cummax(xd_m, 1).values
-        beta_low  = torch.cummax(-xd_p, 1).values + torch.cummax(-xd_m, 1).values
-        gamma_sup = torch.cummin(xc_p, 1).values  + torch.cummin(xc_m, 1).values
-        gamma_low = torch.cummin(-xc_p, 1).values + torch.cummin(-xc_m, 1).values
+        beta_k_sup  = torch.cummax(xd_p, dim=-1).values  + torch.cummax(xd_m, dim=-1).values
+        beta_k_low  = torch.cummax(-xd_p, dim=-1).values + torch.cummax(-xd_m, dim=-1).values
+        gamma_k_sup = torch.cummin(xc_p, dim=-1).values  + torch.cummin(xc_m, dim=-1).values
+        gamma_k_low = torch.cummin(-xc_p, dim=-1).values + torch.cummin(-xc_m, dim=-1).values
 
-        def delta(t):  
-            return torch.cat([t[:, :1], t[:, 1:] - t[:, :-1]], dim=1)
+      
+        zeros = torch.zeros_like(beta_k_sup[..., :1])
+        beta_k_1_sup  = torch.cat([zeros, beta_k_sup[..., :-1]],  dim=-1)
+        beta_k_1_low  = torch.cat([zeros, beta_k_low[..., :-1]],  dim=-1)
+        gamma_k_1_sup = torch.cat([zeros, gamma_k_sup[..., :-1]], dim=-1)
+        gamma_k_1_low = torch.cat([zeros, gamma_k_low[..., :-1]], dim=-1)
 
-        y_sup = delta(beta_sup) @ phi_plus.T + delta(gamma_sup) @ phi_moins.T
-        y_low = -(delta(beta_low) @ phi_plus.T + delta(gamma_low) @ phi_moins.T)
+        
+        y_sup = (beta_k_sup - beta_k_1_sup) @ w_plus.T + (gamma_k_sup - gamma_k_1_sup) @ w_moin.T
+        y_low = -((beta_k_low - beta_k_1_low) @ w_plus.T + (gamma_k_low - gamma_k_1_low) @ w_moin.T)
 
         if squeeze:
             y_low, y_sup = y_low.squeeze(0), y_sup.squeeze(0)
