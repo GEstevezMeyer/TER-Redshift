@@ -14,35 +14,30 @@ class BaseMetric(nn.Module, ABC):
 """
 
 class WinklerScore(nn.Module):
-    def __init__(self, alpha : float, pred : list[tuple[float, float]], reel : list[float]):
+    def __init__(self, alpha:float):
         super().__init__()
-        
-        self.alpha = alpha
-        self.pred = pred
-        self.reel = reel
 
-    def forward(self) -> float:
+        self.alpha = alpha
+
+    def forward(self, pred:list[list[float]], reel:list[float])-> float:
         score = 0
-        for p, r in zip(self.pred, self.reel):
+        for p, r in zip(pred, reel):
             lower, upper = p[0], p[1]
             score += upper - lower
             if r > upper:
-                score += (2/self.alpha)*(r - upper)
+                score += (2/self.alpha) * (r - upper)
             elif r < lower:
-                score += (2/self.alpha)*(lower - r)
+                score += (2/self.alpha) * (lower - r)
 
-        return score/len(self.reel)
+        return score/len(reel)
 
 
 class MAE_RMSE_IR(nn.Module):
-    def __init__(self, alpha : float, pred : list[tuple[float, float]], reel : list[float]):
+    def __init__(self):
         super().__init__()
-        
-        self.alpha = alpha
-        self.pred = pred
-        self.reel = reel
 
-    def forward(self) -> list[float]:
+    def forward(self, pred:list[list[float]], reel:list[float]) -> list[float]:
+
         IR = 0
         MAE_score, RMSE_score = 0, 0
         MAE_score_excl, RMSE_score_excl = 0, 0
@@ -64,6 +59,6 @@ class MAE_RMSE_IR(nn.Module):
             else:
                 IR += 1
 
-        return [(MAE_score)/len(self.reel), ((RMSE_score)/len(self.reel))**0.5,
-                (MAE_score_excl)/len(self.reel), ((RMSE_score_excl)/len(self.reel))**0.5,
-                (IR)/len(self.reel)]
+        return [(MAE_score)/len(reel), ((RMSE_score)/len(reel))**0.5,
+                (MAE_score_excl)/len(reel), ((RMSE_score_excl)/len(reel))**0.5,
+                (IR)/len(reel)]
