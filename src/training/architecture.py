@@ -98,29 +98,52 @@ class MinMax(nn.Module):
         super().__init__()
 
     def forward(self,a,b): 
-        return a.min(),b.max()
+        return torch.minimum(a, b), torch.maximum(a, b)
 
-
-class MacSumIntervallArchitecture(nn.Module):
-    def __init__(self,input_size:int,listDenseIn:list[int],MacSumIn:int,MacSumOut:int):
+class MacSumDenseMinMax(nn.Module):
+    def __init__(self, MacSumIn: int, MacSumOut: int, output_size: int, linearStart: int,
+                 linearN: int, increment: int, inproper=False):
         super().__init__()
-        self.input_size = input_size
-        self.listDenseIn = listDenseIn
         self.MacSumIn = MacSumIn
         self.MacSumOut = MacSumOut
 
-        self.MacSum = NeuroneMacSum(self.input_size,self.MacSumOut)
-        listForwardDense = [nn.Linear(self.MacSumOut,self.listDenseIn[0])]
-        if len(listDenseIn) > 1:
-            for i in range(0,len(listForwardDense)-1):
-                listForwardDense.append(nn.Linear(self.listDenseIn[i],self.listDenseIn[i+1]))
+        self.linearStart = linearStart
+        self.linearN = linearN
+        self.increment = increment
+        self.inproper = inproper
+        self.output_size = output_size
 
-        self.ForwardPass = nn.Sequential(*listForwardDense)
+        last_size = MacSumOut - increment * linearN * (linearN + 1) // 2  
+
+        assert linearN >= 0, "linearN can't be negative"
+        assert increment >= 0, "increment can't be negative"
+        assert linearStart <= MacSumOut, "linearStart can't be bigger than MacSumOut"
+        assert output_size >= 1, "output_size must be positive"
+        assert output_size <= last_size, "output size can't be bigger than the last linear layer input size"
+
+        self.MacSum = NeuroneMacSum(self.MacSumIn, self.MacSumOut)
         self.MinMax = MinMax()
 
-    def forward(self,x):
-        x_low,x_sup = self.MacSum(x)
-        return self.MinMax(self.ForwardPass(x_low),self.ForwardPass(x_sup))
+        listLinear = []
+        current_input = self.MacSumOut
+
+        for i in range(0, linearN):
+            listLinear.append(nn.Linear(current_input, current_input - (i + 1) * increment))
+            listLinear.append(nn.ReLU())                      
+            current_input = current_input - (i + 1) * increment
+
+        listLinear.append(nn.Linear(current_input, output_size))   
+
+        self.ForwardPass = nn.Sequential(*listLinear)
+
+    def forward(self, x):
+        x_low, x_sup = self.MacSum(x)
+        if self.inproper:
+            x_low, x_sup = x_sup, x_low
+
+        return self.MinMax(self.ForwardPass(x_low), self.ForwardPass(x_sup))        
+
+
 
             
 
@@ -152,22 +175,72 @@ if __name__ == "__main__":
     print(f"Final neurone loss: {loss.item():.4f}")
 
     print("\n--- TEST ARCHITECTURE ---")
-    arch = MacSumIntervallArchitecture(input_size=5, listDenseIn=[10, 1], MacSumIn=5, MacSumOut=3)
+    arch = MacSumDenseMinMax(MacSumIn=5, MacSumOut=8, output_size=1,
+                            linearStart=8, linearN=2, increment=1, inproper=False)
     x_arch = torch.randn(5)
-    
+
     optimizer_arch = torch.optim.Adam(arch.parameters(), lr=0.01)
     target = torch.tensor([1.0])
-    
+
     for epoch in range(50):
         optimizer_arch.zero_grad()
         low, sup = arch(x_arch)
         loss_arch = torch.mean((low - target)**2 + (sup - target)**2)
         loss_arch.backward()
         optimizer_arch.step()
-        
+
     final_low, final_sup = arch(x_arch)
+    final_loss = torch.mean((final_low - target)**2 + (final_sup - target)**2)
+
     print(f"Final Architecture Low: {final_low.item():.4f}")
     print(f"Final Architecture Sup: {final_sup.item():.4f}")
-    print(f"Final Architecture Loss: {loss_arch.item():.4f}")
+    print(f"Final Architecture Loss: {final_loss.item():.4f}")
+
+    assert final_low.shape == (1,) and final_sup.shape == (1,)
+    assert (final_low <= final_sup).all(), "MinMax should give low <= sup"
+    assert final_loss.item() < 1.0, "loss did not decrease"
     print("Architecture Test: SUCCESS")
 
+
+    print("\n--- TEST ARCHITECTURE (BATCH) ---")
+    torch.manual_seed(0)
+    B = 32
+    arch = MacSumDenseMinMax(MacSumIn=5, MacSumOut=8, output_size=1,
+                            linearStart=8, linearN=2, increment=1, inproper=False)
+    x_arch = torch.randn(B, 5)
+    target = torch.ones(B, 1)
+
+    optimizer_arch = torch.optim.Adam(arch.parameters(), lr=0.01)
+
+    with torch.no_grad():
+        low0, sup0 = arch(x_arch)
+        initial_loss = torch.mean((low0 - target)**2 + (sup0 - target)**2)
+
+    for epoch in range(50):
+        optimizer_arch.zero_grad()
+        low, sup = arch(x_arch)
+        loss_arch = torch.mean((low - target)**2 + (sup - target)**2)
+        loss_arch.backward()
+        optimizer_arch.step()
+
+    with torch.no_grad():
+        final_low, final_sup = arch(x_arch)
+        final_loss = torch.mean((final_low - target)**2 + (final_sup - target)**2)
+
+    print(f"Shapes: low {tuple(final_low.shape)}, sup {tuple(final_sup.shape)}")
+    print(f"Initial loss: {initial_loss.item():.4f}")
+    print(f"Final loss:   {final_loss.item():.4f}")
+    print(f"Low  (mean/min/max): {final_low.mean():.4f} / {final_low.min():.4f} / {final_low.max():.4f}")
+    print(f"Sup  (mean/min/max): {final_sup.mean():.4f} / {final_sup.min():.4f} / {final_sup.max():.4f}")
+
+    assert final_low.shape == (B, 1) and final_sup.shape == (B, 1)
+    assert (final_low <= final_sup).all(), "MinMax should give low <= sup"
+    assert final_loss.item() < initial_loss.item(), "loss did not decrease"
+
+    with torch.no_grad():
+        for b in range(B):
+            lo_b, up_b = arch(x_arch[b])
+            assert torch.allclose(final_low[b], lo_b, atol=1e-5)
+            assert torch.allclose(final_sup[b], up_b, atol=1e-5)
+
+    print("Architecture Test (batch): SUCCESS")
