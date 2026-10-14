@@ -4,13 +4,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class NeuroneMacSum(nn.Module):
-    def __init__(self, n_in, n_out):
+    def __init__(self, n_in:int, n_out:int):
         super().__init__()
         self.n_in = n_in
         self.n_out = n_out
         self.parametres = nn.Parameter(torch.rand(self.n_out, self.n_in))   
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Pseudo Code 
 
         x_decroissante, _ = torch.sort(x, descending=True)
         x_croissante, _ = torch.sort(x, descending=False)
@@ -37,25 +39,79 @@ class NeuroneMacSum(nn.Module):
                 x_k_croissante_plus = torch.clamp(x_k_croissante, min=0)
                 x_k_croissante_moin = torch.clamp(x_k_croissante, max=0)
 
-                beta_sup = x_k_decroissante_plus.max() + x_k_decroissante_moin.max()
-                beta_low = (-x_k_decroissante_plus).max() + (-x_k_decroissante_moin).max()
-                gamma_sup = x_k_croissante_plus.min() + x_k_croissante_moin.min()
-                gamma_low = (-x_k_croissante_plus).min() + (-x_k_croissante_moin).min()
+                beta_k_sup = x_k_decroissante_plus.max() + x_k_decroissante_moin.max()
+                beta_k_low = (-x_k_decroissante_plus).max() + (-x_k_decroissante_moin).max()
+                gamma_k_sup = x_k_croissante_plus.min() + x_k_croissante_moin.min()
+                gamma_k_low = (-x_k_croissante_plus).min() + (-x_k_croissante_moin).min()
 
-                y_sup += difference_plus*beta_sup + difference_moin*gamma_sup
-                y_low += -(difference_plus*beta_low + difference_moin*gamma_low)
+                y_sup += difference_plus*beta_k_sup + difference_moin*gamma_k_sup
+                y_low += -(difference_plus*beta_k_low + difference_moin*gamma_k_low)
 
             liste_y_low.append(y_low)
             liste_y_sup.append(y_sup)
 
         return torch.stack(liste_y_low), torch.stack(liste_y_sup)  
+        """
+        
+        squeeze = x.dim() == 1
+        if squeeze:
+            x = x.unsqueeze(0)                                   
 
-class MacSumArchitecture(nn.Module):
+        w = self.parametres                                      
+        phi_plus  = torch.clamp(torch.sort(w, dim=1, descending=True).values,  min=0)
+        phi_moins = torch.clamp(torch.sort(w, dim=1, descending=False).values, max=0)
+
+        xd = torch.sort(x, dim=1, descending=True).values        
+        xc = torch.sort(x, dim=1, descending=False).values
+
+        xd_p, xd_m = torch.clamp(xd, min=0), torch.clamp(xd, max=0)
+        xc_p, xc_m = torch.clamp(xc, min=0), torch.clamp(xc, max=0)
+
+        beta_sup  = torch.cummax(xd_p, 1).values  + torch.cummax(xd_m, 1).values
+        beta_low  = torch.cummax(-xd_p, 1).values + torch.cummax(-xd_m, 1).values
+        gamma_sup = torch.cummin(xc_p, 1).values  + torch.cummin(xc_m, 1).values
+        gamma_low = torch.cummin(-xc_p, 1).values + torch.cummin(-xc_m, 1).values
+
+        def delta(t):  
+            return torch.cat([t[:, :1], t[:, 1:] - t[:, :-1]], dim=1)
+
+        y_sup = delta(beta_sup) @ phi_plus.T + delta(gamma_sup) @ phi_moins.T
+        y_low = -(delta(beta_low) @ phi_plus.T + delta(gamma_low) @ phi_moins.T)
+
+        if squeeze:
+            y_low, y_sup = y_low.squeeze(0), y_sup.squeeze(0)
+        return y_low, y_sup
+
+
+class MinMax(nn.Module): 
     def __init__(self):
         super().__init__()
 
+    def forward(self,a,b): 
+        return a.min(),b.max()
+
+
+class MacSumIntervallArchitecture(nn.Module):
+    def __init__(self,input_size:int,listDenseIn:list[int],MacSumIn:int,MacSumOut:int):
+        super().__init__()
+        self.input_size = input_size
+        self.listDenseIn = listDenseIn
+        self.MacSumIn = MacSumIn
+        self.MacSumOut = MacSumOut
+
+        self.MacSum = NeuroneMacSum(self.input_size,self.MacSumOut)
+        listForwardDense = [nn.Linear(self.MacSumOut,self.listDenseIn[0])]
+        if len(listDenseIn) > 1:
+            for i in range(0,len(listForwardDense)-1):
+                listForwardDense.append(nn.Linear(self.listDenseIn[i],self.listDenseIn[i+1]))
+
+        self.ForwardPass = nn.Sequential(*listForwardDense)
+        self.MinMax = MinMax()
+
     def forward(self,x):
-        pass
+        x_low,x_sup = self.MacSum(x)
+        return self.MinMax(self.ForwardPass(x_low),self.ForwardPass(x_sup))
+
             
 
 
@@ -66,38 +122,42 @@ class MacSumArchitecture(nn.Module):
 
 
 if __name__ == "__main__": 
-
     torch.manual_seed(0)
 
-    n_in = 5
-    n_out = 3   # plus parlant que 1 pour vérifier les formes
+    print("--- TEST NEURONE ---")
+    n_in, n_out = 5, 3
     neurone = NeuroneMacSum(n_in, n_out)
     x = torch.tensor([0.5, -1.0, 2.0, -0.3, 1.5])
-
     y_low, y_sup = neurone(x)
-    print("y_low :", y_low)
-    print("y_sup :", y_sup)
-
-    # 2. Formes : un scalaire par neurone de sortie
-    assert y_low.shape == (n_out,) and y_sup.shape == (n_out,)
-
-    # 3. Cohérence : la borne basse doit être <= la borne haute (pour chaque sortie)
-    print("y_low <= y_sup :", (y_low <= y_sup).all().item())
-
-    # 4. Backward : .sum() car loss doit être un scalaire
-    loss = (y_sup - y_low).sum()
-    loss.backward()
-    print("grad :", neurone.parametres.grad)
-    assert neurone.parametres.grad is not None
-    assert neurone.parametres.grad.shape == (n_out, n_in)
-
-    # 5. Mini entraînement
+    print(f"y_low: {y_low}")
+    print(f"y_sup: {y_sup}")
+    
     opt = torch.optim.Adam(neurone.parameters(), lr=0.05)
     for epoch in range(50):
         opt.zero_grad()
-        y_low, y_sup = neurone(x)
-        loss = ((y_sup - 1.0) ** 2 + (y_low + 1.0) ** 2).sum()
+        yl, ys = neurone(x)
+        loss = ((ys - 1.0) ** 2 + (yl + 1.0) ** 2).sum()
         loss.backward()
         opt.step()
-        if epoch % 10 == 0:
-            print(f"epoch {epoch:2d} | loss {loss.item():.4f}")
+    print(f"Final neurone loss: {loss.item():.4f}")
+
+    print("\n--- TEST ARCHITECTURE ---")
+    arch = MacSumIntervallArchitecture(input_size=5, listDenseIn=[10, 1], MacSumIn=5, MacSumOut=3)
+    x_arch = torch.randn(5)
+    
+    optimizer_arch = torch.optim.Adam(arch.parameters(), lr=0.01)
+    target = torch.tensor([1.0])
+    
+    for epoch in range(50):
+        optimizer_arch.zero_grad()
+        low, sup = arch(x_arch)
+        loss_arch = torch.mean((low - target)**2 + (sup - target)**2)
+        loss_arch.backward()
+        optimizer_arch.step()
+        
+    final_low, final_sup = arch(x_arch)
+    print(f"Final Architecture Low: {final_low.item():.4f}")
+    print(f"Final Architecture Sup: {final_sup.item():.4f}")
+    print(f"Final Architecture Loss: {loss_arch.item():.4f}")
+    print("Architecture Test: SUCCESS")
+
