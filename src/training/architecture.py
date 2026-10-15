@@ -17,18 +17,15 @@ class NeuroneMacSum(nn.Module):
 
     def _mixed(self, x_upper: Tensor, x_lower: Tensor, upper_when_pos: bool):
             B, K = x_upper.shape
-            with torch.no_grad():
-                mask_neg = (self.parametres < 0).unsqueeze(0)  
-    
-            x_lower_exp = x_lower.unsqueeze(1).expand(B, K, self.n_in)
-            x_upper_exp = x_upper.unsqueeze(1).expand(B, K, self.n_in)
-    
+            mask = (self.parametres.mean(dim=1) < 0).unsqueeze(0) 
+            mask = mask.expand(B, K)
+
             if upper_when_pos:  
-                x_sup = torch.where(mask_neg, x_lower_exp, x_upper_exp)  
-                x_inf = torch.where(mask_neg, x_upper_exp, x_lower_exp)  
+                x_sup = torch.where(mask, x_lower, x_upper)  
+                x_inf = torch.where(mask, x_upper, x_lower)  
             else:               
-                x_sup = torch.where(mask_neg, x_upper_exp, x_lower_exp)  
-                x_inf = torch.where(mask_neg, x_lower_exp, x_upper_exp)  
+                x_sup = torch.where(mask, x_upper, x_lower)  
+                x_inf = torch.where(mask, x_lower, x_upper)  
             return x_inf, x_sup
     
     def conjunctive(self, x_upper: Tensor, x_lower: Tensor):
@@ -61,8 +58,6 @@ class NeuroneMacSum(nn.Module):
         beta_k_low  = torch.cummax(-xd_p, dim=-1).values + torch.cummax(-xd_m, dim=-1).values
         gamma_k_sup = torch.cummin(xc_p, dim=-1).values  + torch.cummin(xc_m, dim=-1).values
         gamma_k_low = torch.cummin(-xc_p, dim=-1).values + torch.cummin(-xc_m, dim=-1).values
-
-        print(beta_k_low.shape)
       
         zeros = torch.zeros_like(beta_k_sup[..., :1])
         beta_k_1_sup  = torch.cat([zeros, beta_k_sup[..., :-1]],  dim=-1)
@@ -74,16 +69,18 @@ class NeuroneMacSum(nn.Module):
         y_sup = (beta_k_sup - beta_k_1_sup) @ w_plus.T   + (gamma_k_sup - gamma_k_1_sup) @ w_moin.T
         y_low = -((beta_k_low - beta_k_1_low) @ w_plus.T + (gamma_k_low - gamma_k_1_low) @ w_moin.T)
 
-        if squeeze:
-            y_low, y_sup = y_low.squeeze(0), y_sup.squeeze(0)
-
-        if self.conjunctive:
+        
+        
+        if self.is_conjunctive:
             y_low, y_sup = self.conjunctive(y_sup,y_low)
         else:
             y_low,y_sup = self.disjunctive(y_sup,y_low)
+        
+        if squeeze:
+            y_low, y_sup = y_low.squeeze(0), y_sup.squeeze(0)
 
         return y_low, y_sup
-
+        
     
 
 
@@ -170,7 +167,7 @@ if __name__ == "__main__":
 
     print("\n--- TEST ARCHITECTURE ---")
     arch = MacSumDenseMinMax(MacSumIn=5, MacSumOut=8, output_size=1,
-                            linearStart=8, linearN=2, increment=1, inproper=False)
+                            linearStart=8, linearN=2, increment=1)
     x_arch = torch.randn(5)
 
     optimizer_arch = torch.optim.Adam(arch.parameters(), lr=0.01)
@@ -190,7 +187,7 @@ if __name__ == "__main__":
     print(f"Final Architecture Sup: {final_sup.item():.4f}")
     print(f"Final Architecture Loss: {final_loss.item():.4f}")
 
-    assert final_low.shape == (1,) and final_sup.shape == (1,)
+    assert final_low.numel() == 1 and final_sup.numel() == 1
     assert (final_low <= final_sup).all(), "MinMax should give low <= sup"
     assert final_loss.item() < 1.0, "loss did not decrease"
     print("Architecture Test: SUCCESS")
@@ -200,7 +197,7 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     B = 32
     arch = MacSumDenseMinMax(MacSumIn=5, MacSumOut=8, output_size=1,
-                            linearStart=8, linearN=2, increment=1, inproper=False)
+                            linearStart=8, linearN=2, increment=1)
     x_arch = torch.randn(B, 5)
     target = torch.ones(B, 1)
 
