@@ -25,7 +25,6 @@ class BaseIntervallLoss(nn.Module, ABC):
 #         return loss
 
 
-
 class RMSELoss(nn.Module):
     """
     RMSE classique : sqrt( mean( (y_pred - y_true)^2 ) + eps )

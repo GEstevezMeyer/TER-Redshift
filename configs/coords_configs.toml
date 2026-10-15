@@ -1,7 +1,0 @@
-rerun = "pdr3_wide"
-sw = "2asec"
-sh = "2asec"
-image = true
-mask = true
-variance = true
-type = "coadd"
