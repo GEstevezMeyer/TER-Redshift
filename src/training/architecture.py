@@ -3,56 +3,41 @@ from torch import Tensor
 import torch.nn as nn 
 import torch.nn.functional as F
 
+
+
+
 class NeuroneMacSum(nn.Module):
-    def __init__(self, n_in:int, n_out:int):
+    def __init__(self, n_in:int, n_out:int,conjunctive = True):
         super().__init__()
         self.n_in = n_in
         self.n_out = n_out
-        self.parametres = nn.Parameter(torch.rand(self.n_out, self.n_in))   
+        self.parametres = nn.Parameter(torch.rand(self.n_out, self.n_in)) 
+        self.is_conjunctive = conjunctive  
+
+
+    def _mixed(self, x_upper: Tensor, x_lower: Tensor, upper_when_pos: bool):
+            B, K = x_upper.shape
+            with torch.no_grad():
+                mask_neg = (self.parametres < 0).unsqueeze(0)  
+    
+            x_lower_exp = x_lower.unsqueeze(1).expand(B, K, self.n_in)
+            x_upper_exp = x_upper.unsqueeze(1).expand(B, K, self.n_in)
+    
+            if upper_when_pos:  
+                x_sup = torch.where(mask_neg, x_lower_exp, x_upper_exp)  
+                x_inf = torch.where(mask_neg, x_upper_exp, x_lower_exp)  
+            else:               
+                x_sup = torch.where(mask_neg, x_upper_exp, x_lower_exp)  
+                x_inf = torch.where(mask_neg, x_lower_exp, x_upper_exp)  
+            return x_inf, x_sup
+    
+    def conjunctive(self, x_upper: Tensor, x_lower: Tensor):
+        return self._mixed(x_upper, x_lower, upper_when_pos=False)
+    
+    def disjunctive(self, x_upper: Tensor, x_lower: Tensor):
+        return self._mixed(x_upper, x_lower, upper_when_pos=True)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
-        """
-        Pseudo Code 
-
-        x_decroissante, _ = torch.sort(x, descending=True)
-        x_croissante, _ = torch.sort(x, descending=False)
-        liste_y_low = []
-        liste_y_sup = []
-
-        for j in range(self.n_out):
-            _, i_parameters_decroissante = torch.sort(self.parametres[j], descending=True)
-            _, i_parameters_croissante = torch.sort(self.parametres[j], descending=False)
-            y_sup = 0
-            y_low = 0
-
-            for k in range(0, self.n_in):
-                difference_plus = torch.clamp(self.parametres[j, i_parameters_decroissante[k]], min=0) \
-                    - (torch.clamp(self.parametres[j, i_parameters_decroissante[k+1]], min=0) if k + 1 < self.n_in else 0)
-                difference_moin = torch.clamp(self.parametres[j, i_parameters_croissante[k]], max=0) \
-                    - (torch.clamp(self.parametres[j, i_parameters_croissante[k+1]], max=0) if k + 1 < self.n_in else 0)
-
-                x_k_decroissante = x_decroissante[:k+1]
-                x_k_croissante = x_croissante[:k+1]
-
-                x_k_decroissante_plus = torch.clamp(x_k_decroissante, min=0)
-                x_k_decroissante_moin = torch.clamp(x_k_decroissante, max=0)
-                x_k_croissante_plus = torch.clamp(x_k_croissante, min=0)
-                x_k_croissante_moin = torch.clamp(x_k_croissante, max=0)
-
-                beta_k_sup = x_k_decroissante_plus.max() + x_k_decroissante_moin.max()
-                beta_k_low = (-x_k_decroissante_plus).max() + (-x_k_decroissante_moin).max()
-                gamma_k_sup = x_k_croissante_plus.min() + x_k_croissante_moin.min()
-                gamma_k_low = (-x_k_croissante_plus).min() + (-x_k_croissante_moin).min()
-
-                y_sup += difference_plus*beta_k_sup + difference_moin*gamma_k_sup
-                y_low += -(difference_plus*beta_k_low + difference_moin*gamma_k_low)
-
-            liste_y_low.append(y_low)
-            liste_y_sup.append(y_sup)
-
-        return torch.stack(liste_y_low), torch.stack(liste_y_sup)  
-        """
-        
         squeeze = x.dim() == 1
         if squeeze:
             x = x.unsqueeze(0)                                 
@@ -67,7 +52,7 @@ class NeuroneMacSum(nn.Module):
 
        
         xd, _ = torch.sort(x, dim=1, descending=True)
-        xc, _ = torch.sort(x, dim=1, descending=False)
+        xc, _ =  torch.sort(x, dim=1, descending=False)
 
         xd_p, xd_m = torch.clamp(xd, min=0), torch.clamp(xd, max=0)
         xc_p, xc_m = torch.clamp(xc, min=0), torch.clamp(xc, max=0)
@@ -77,6 +62,7 @@ class NeuroneMacSum(nn.Module):
         gamma_k_sup = torch.cummin(xc_p, dim=-1).values  + torch.cummin(xc_m, dim=-1).values
         gamma_k_low = torch.cummin(-xc_p, dim=-1).values + torch.cummin(-xc_m, dim=-1).values
 
+        print(beta_k_low.shape)
       
         zeros = torch.zeros_like(beta_k_sup[..., :1])
         beta_k_1_sup  = torch.cat([zeros, beta_k_sup[..., :-1]],  dim=-1)
@@ -85,12 +71,20 @@ class NeuroneMacSum(nn.Module):
         gamma_k_1_low = torch.cat([zeros, gamma_k_low[..., :-1]], dim=-1)
 
         
-        y_sup = (beta_k_sup - beta_k_1_sup) @ w_plus.T + (gamma_k_sup - gamma_k_1_sup) @ w_moin.T
+        y_sup = (beta_k_sup - beta_k_1_sup) @ w_plus.T   + (gamma_k_sup - gamma_k_1_sup) @ w_moin.T
         y_low = -((beta_k_low - beta_k_1_low) @ w_plus.T + (gamma_k_low - gamma_k_1_low) @ w_moin.T)
 
         if squeeze:
             y_low, y_sup = y_low.squeeze(0), y_sup.squeeze(0)
+
+        if self.conjunctive:
+            y_low, y_sup = self.conjunctive(y_sup,y_low)
+        else:
+            y_low,y_sup = self.disjunctive(y_sup,y_low)
+
         return y_low, y_sup
+
+    
 
 
 class MinMax(nn.Module): 
@@ -102,7 +96,7 @@ class MinMax(nn.Module):
 
 class MacSumDenseMinMax(nn.Module):
     def __init__(self, MacSumIn: int, MacSumOut: int, output_size: int, linearStart: int,
-                 linearN: int, increment: int, inproper=False):
+                 linearN: int, increment: int):
         super().__init__()
         self.MacSumIn = MacSumIn
         self.MacSumOut = MacSumOut
@@ -110,7 +104,6 @@ class MacSumDenseMinMax(nn.Module):
         self.linearStart = linearStart
         self.linearN = linearN
         self.increment = increment
-        self.inproper = inproper
         self.output_size = output_size
 
         last_size = MacSumOut - increment * linearN * (linearN + 1) // 2  
@@ -136,12 +129,13 @@ class MacSumDenseMinMax(nn.Module):
 
         self.ForwardPass = nn.Sequential(*listLinear)
 
+
     def forward(self, x):
         x_low, x_sup = self.MacSum(x)
-        if self.inproper:
-            x_low, x_sup = x_sup, x_low
+        return self.MinMax(self.ForwardPass(x_low), self.ForwardPass(x_sup)) 
 
-        return self.MinMax(self.ForwardPass(x_low), self.ForwardPass(x_sup))        
+       
+
 
 
 
@@ -244,3 +238,13 @@ if __name__ == "__main__":
             assert torch.allclose(final_sup[b], up_b, atol=1e-5)
 
     print("Architecture Test (batch): SUCCESS")
+
+
+    phi = [-5,-2, 1, 4]
+    x = torch.Tensor([-1, 1,-3, 2]).unsqueeze(0)
+
+    test = NeuroneMacSum(4,1)
+    test.parametres = nn.Parameter(torch.Tensor(phi).unsqueeze(0))
+
+    with torch.no_grad():
+        print(test(x))
