@@ -8,6 +8,7 @@ import argparse
 import sys
 import json
 from src.training.loss import RMSELoss, IntervalRMSELoss
+from src.training.metric import WinklerScore, MAE_RMSE_IR
 
 from tqdm import tqdm
 from src.utils.configs import import_config, return_device
@@ -31,7 +32,9 @@ OPTIMIZER_REGISTRY = {
 }
 
 METRICS_REGISTRY = {
-    "R2": lambda x:x
+    "R2": lambda x:x,
+    "winkler": WinklerScore,
+    "mae_rmse_ir": MAE_RMSE_IR,
 }
 
 
@@ -45,15 +48,20 @@ LOSS_REGISTRY = {
 DEFAULT_OPTIMIZER = optim.Adam
 
 
-def get_optimizer(optimizer_config: dict[str, any]) -> Callable:
+def get_optimizer(params, optimizer_config: dict[str, any]) -> Callable:
     optimizer_config = optimizer_config.copy()
     name = optimizer_config.pop("name")
-    return OPTIMIZER_REGISTRY.get(name, DEFAULT_OPTIMIZER)(**optimizer_config)
+    return OPTIMIZER_REGISTRY.get(name, DEFAULT_OPTIMIZER)(params, **optimizer_config)
 
 def get_metric(metric_config: dict[str, any]) -> tuple[str, Callable]:
     metric_config = metric_config.copy()
     name = metric_config.pop("name")
-    return name, METRICS_REGISTRY.get(name)
+    metric_class = METRICS_REGISTRY.get(name)
+    
+    if isinstance(metric_class, type):
+        return name, metric_class(**metric_config)
+    
+    return name, metric_class
 def get_loss(loss_config: dict[str, any]) -> tuple[str, Callable]:
     loss_config = loss_config.copy()
     name = loss_config.pop("name")
@@ -77,15 +85,15 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
     configs_model = configs["model"]
     configs_training = configs["training"]
 
-    optimizer:Callable = get_optimizer(configs_training["optimizer"])
-    loss_name,loss_function = get_loss(configs_training["loss"])
-    metric_name,metric_function = get_metric(configs_training["metric"])
     model = build_MacSumIntervallArchitecture_model(configs_model)
-
     device:str = return_device()
 
     model = model.train()
     model = model.to(device)
+
+    optimizer:Callable = get_optimizer(model.parameters(), configs_training["optimizer"])
+    loss_name,loss_function = get_loss(configs_training["loss"])
+    metric_name,metric_function = get_metric(configs_training["metric"])
 
     loss_res:list[float] = []
     metrics_res:list[float] = []
@@ -99,9 +107,10 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
             optimizer.zero_grad()
 
             outputs = model(x)
-
+            
             loss = loss_function(*outputs, y)
             loss.backward()
+
 
             optimizer.step()
 
@@ -110,9 +119,27 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
         loss_res.append(actual_loss)
 
         if (i % eval_frequency == 0):
-            metric = metric_function(model,eval_dataloader)
+            model.eval()
+            all_preds = []
+            all_reels = []
+            with torch.no_grad():
+                for x_eval, y_eval in eval_dataloader:
+                    x_eval = x_eval.to(device)
+                    y_eval = y_eval.to(device)
+                    outputs = model(x_eval)
+                    # outputs is (low, sup)
+                    pred_low, pred_sup = outputs
+                    preds = torch.stack([pred_low, pred_sup], dim=1)
+                    all_preds.append(preds)
+                    all_reels.append(y_eval)
+            
+            all_preds = torch.cat(all_preds, dim=0)
+            all_reels = torch.cat(all_reels, dim=0)
+            
+            metric = metric_function(all_preds, all_reels)
             metrics_res.append(metric)
             print(f"{metric_name}: {metric}| {loss_name}: {actual_loss}")
+            model.train()
 
     results = {
         "loss": loss_res,

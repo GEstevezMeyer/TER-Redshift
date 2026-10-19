@@ -37,10 +37,11 @@ class IntervalRMSELoss(nn.Module):
 
     def forward(
         self, 
-        preds: tuple[Tensor, Tensor], 
+        y_low: Tensor, 
+        y_sup: Tensor, 
         target: Tensor | tuple[Tensor, Tensor]
     ) -> Tensor:
-        y_low, y_sup = preds
+        preds = (y_low, y_sup)
 
         # Si target est un tuple (target_low, target_sup) ou un tenseur unique
         if isinstance(target, (tuple, list)):

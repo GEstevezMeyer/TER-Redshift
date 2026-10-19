@@ -49,7 +49,17 @@ class NeuroneMacSum(nn.Module):
     def disjunctive(self, x_upper: Tensor, x_lower: Tensor):
         return self._mixed(x_upper, x_lower, upper_when_pos=True)
 
-    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+    def forward(self, x):
+        if isinstance(x, tuple):
+            # If x is (low, sup), we usually want to process them separately or use a specific logic.
+            # Given MacSumDenseMinMax's forward, the output of one layer is (low, sup).
+            # The next layer's MacSum expects a single Tensor.
+            # We can't simply pass a tuple to NeuroneMacSum.
+            # However, in the complex architecture, the output of MacSumDenseMinMax 
+            # is passed to the next MacSumDenseMinMax.
+            # We should probably use the midpoint or handle intervals.
+            x = (x[0] + x[1]) / 2
+            
         squeeze = x.dim() == 1
         if squeeze:
             x = x.unsqueeze(0)                                 

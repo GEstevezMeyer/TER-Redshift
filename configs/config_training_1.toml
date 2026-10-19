@@ -1,22 +1,25 @@
 [model]
-input_shape = 5
-lis_MacSumOut = [8]
-lis_output_size = [1]
-lis_activation = ["relu"]
-lis_increments = [1]
-lis_linears_start = [8]
-lis_LinearN = [2]
-lis_point_estim_function = ["mean"]
+input_shape = 1024
+lis_MacSumOut = [128, 64, 32]
+lis_output_size = [32, 16, 1]
+lis_activation = ["leaky_relu", "gelu", "relu"]
+lis_increments = [2, 1, 1]
+lis_linears_start = [128, 32, 16]
+lis_LinearN = [3, 2, 1]
+lis_point_estim_function = ["mean", "mean", "mean"]
 conjunctive_start = true
 
 [training]
 [training.optimizer]
-name = "adam"
-lr = 0.001
+name = "adamw"
+lr = 0.005
+weight_decay = 0.01
 
 [training.loss]
 name = "interval_rmse"
 mode = "combined"
+eps = 1e-7
 
 [training.metric]
-name = "R2"
+name = "winkler"
+alpha = 0.1

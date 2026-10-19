@@ -17,8 +17,8 @@ class EspaceLatent(Dataset):
         return len(self.final_latent)
 
     def __getitem__(self, idx):
-        x = torch.tensor(self.X[idx].copy(), dtype=torch.float32)
-        y = torch.tensor(self.y[idx].copy(), dtype=torch.float32)
+        x = torch.tensor(self.final_latent[idx].copy(), dtype=torch.float32)
+        y = torch.tensor(self.labels[idx].copy(), dtype=torch.float32)
         return x,y
 
 
