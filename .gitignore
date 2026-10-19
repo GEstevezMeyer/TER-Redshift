@@ -3,6 +3,11 @@ myenv/
 __pycache__/
 *.py[cod]
 *$py.class
+<<<<<<< HEAD
 
+=======
+Digraph.gv
+Digraph.gv.pdf
+>>>>>>> 454aeec7d31b6b79317fee17a0764b647b69480d
 Ressources/
 .agents/

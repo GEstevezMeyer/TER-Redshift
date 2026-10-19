@@ -7,15 +7,12 @@ from torch.utils.data import DataLoader
 import argparse
 import sys
 
-from src.utils.configs import import_config, return_device
-from src.training.architecture import ChoquetIntervallArchitecture
-
 from tqdm import tqdm
-
 from src.utils.configs import import_config, return_device
-from src.training.architecture import ChoquetIntervallArchitecture
+from src.training.architecture import MacSumIntervallArchitecture
+from src.utils.configs import import_config, return_device
 
-from tqdm import tqdm
+
 
 
 OPTIMIZER_REGISTRY = {
@@ -59,10 +56,10 @@ def get_loss(loss_config: dict[str, any]) -> tuple[str, Callable]:
     name = loss_config.pop("name")
     return name, LOSS_REGISTRY.get(name)
 
-def build_ChoquetIntervallArchitecture_model(configs_model: dict[str, any]) -> ChoquetIntervallArchitecture:
-    return ChoquetIntervallArchitecture(**configs_model)
+def build_MacSumIntervallArchitecture_model(configs_model: dict[str, any]) -> MacSumIntervallArchitecture:
+    return MacSumIntervallArchitecture(**configs_model)
 
-def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:DataLoader,eval_frequency:int,epochs:int) -> ChoquetIntervallArchitecture:
+def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:DataLoader,eval_frequency:int,epochs:int) -> MacSumIntervallArchitecture:
     configs = import_config(config_path)
     configs_model = configs["model"]
     configs_training = configs["training"]
@@ -70,7 +67,7 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
     optimizer:Callable = get_optimizer(configs_training["optimizer"])
     loss_name,loss_function = get_loss(configs_training["loss"])
     metric_name,metric_function = get_metric(configs_training["metric"])
-    model = build_ChoquetIntervallArchitecture_model(configs_model)
+    model = build_MacSumIntervallArchitecture_model(configs_model)
 
     device:str = return_device()
 
@@ -106,15 +103,14 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
 
 
     
-if __name__ == "__main__":
+if __name__ == "__main__": 
+
     parser = argparse.ArgumentParser(description="Train Choquet Intervall Architecture")
     parser.add_argument("--config", type=str, required=True, help="Path to the config file")
     parser.add_argument("--epochs", type=int, required=True, help="Number of epochs")
     parser.add_argument("--eval_freq", type=int, required=True, help="Evaluation frequency")
     
     args = parser.parse_args()
-    
-    # Dataloaders should be initialized here
     print(f"Config: {args.config}, Epochs: {args.epochs}, Eval Frequency: {args.eval_freq}")
 
 
