@@ -6,11 +6,13 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import argparse
 import sys
+import json
+from src.training.loss import RMSELoss, IntervalRMSELoss
 
 from tqdm import tqdm
 from src.utils.configs import import_config, return_device
-from src.training.architecture import MacSumIntervallArchitecture
-from src.utils.configs import import_config, return_device
+from src.training.pipeline import main_pipeline
+from src.training.architecture import ArchitectureMacSum
 
 
 
@@ -34,7 +36,9 @@ METRICS_REGISTRY = {
 
 
 LOSS_REGISTRY = {
-    "mse": F.mse_loss
+    "mse": F.mse_loss,
+    "rmse": RMSELoss,
+    "interval_rmse": IntervalRMSELoss,
 }
 
 
@@ -50,16 +54,25 @@ def get_metric(metric_config: dict[str, any]) -> tuple[str, Callable]:
     metric_config = metric_config.copy()
     name = metric_config.pop("name")
     return name, METRICS_REGISTRY.get(name)
-
 def get_loss(loss_config: dict[str, any]) -> tuple[str, Callable]:
     loss_config = loss_config.copy()
     name = loss_config.pop("name")
-    return name, LOSS_REGISTRY.get(name)
+    loss_class = LOSS_REGISTRY.get(name)
+    
+    if isinstance(loss_class, type):
+        return name, loss_class(**loss_config)
+    
+    return name, loss_class
 
-def build_MacSumIntervallArchitecture_model(configs_model: dict[str, any]) -> MacSumIntervallArchitecture:
-    return MacSumIntervallArchitecture(**configs_model)
+def save_results(results: dict, model: torch.nn.Module, run_name: str = "results"):
+    with open(f"res/{run_name}.json", "w") as f:
+        json.dump(results, f, indent=4)
+    torch.save(model.state_dict(), f"res/{run_name}.pth")
 
-def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:DataLoader,eval_frequency:int,epochs:int) -> MacSumIntervallArchitecture:
+def build_MacSumIntervallArchitecture_model(configs_model: dict[str, any]) -> ArchitectureMacSum:
+    return ArchitectureMacSum(**configs_model)
+
+def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:DataLoader,eval_frequency:int,epochs:int,run_name:str = "results") -> ArchitectureMacSum:
     configs = import_config(config_path)
     configs_model = configs["model"]
     configs_training = configs["training"]
@@ -101,6 +114,14 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
             metrics_res.append(metric)
             print(f"{metric_name}: {metric}| {loss_name}: {actual_loss}")
 
+    results = {
+        "loss": loss_res,
+        "metrics": metrics_res,
+        "config": configs
+    }
+    save_results(results, model, run_name)
+    
+    return model
 
     
 if __name__ == "__main__": 
@@ -110,16 +131,13 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=str, required=True, help="Batch size ")
     parser.add_argument("--epochs", type=int, required=True, help="Number of epochs")
     parser.add_argument("--eval_freq", type=int, required=True, help="Evaluation frequency")
+    parser.add_argument("--run_name", type=str, default="results", help="Name of the result files")
     
     args = parser.parse_args()
     print(f"Config: {args.config}, Epochs: {args.epochs}, Eval Frequency: {args.eval_freq}")
 
-
-
-
-
-
-    
+    train_loader, eval_loader = main_pipeline(int(args.batch_size))
+    training(args.config, train_loader, eval_loader, args.eval_freq, args.epochs, args.run_name)
 
 
 
