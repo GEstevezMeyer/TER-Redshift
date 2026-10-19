@@ -107,6 +107,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train Choquet Intervall Architecture")
     parser.add_argument("--config", type=str, required=True, help="Path to the config file")
+    parser.add_argument("--batch_size", type=str, required=True, help="Batch size ")
     parser.add_argument("--epochs", type=int, required=True, help="Number of epochs")
     parser.add_argument("--eval_freq", type=int, required=True, help="Evaluation frequency")
     
