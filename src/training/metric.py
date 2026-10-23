@@ -12,18 +12,16 @@ class WinklerScore(nn.Module):
 
     def forward(self, pred:list[list[float]], reel:list[float])-> float:
         pred, reel = torch.as_tensor(pred, dtype=torch.float), torch.as_tensor(reel, dtype=torch.float)
+        pred, reel = pred.cpu(), reel.cpu()
         
-        if reel.dim() == 2:
-            reel = reel.view(-1)
-            
-        if pred.dim() == 2:
-            lower = pred[:, 0]
-            upper = pred[:, 1]
-        else:
-            # Handle case where pred might be [N, 1, 2] or similar
-            pred = pred.squeeze()
-            lower = pred[:, 0]
-            upper = pred[:, 1]
+        reel = reel.reshape(-1)
+        if pred.dim() > 2:
+            pred = pred.reshape(pred.shape[0], -1)
+        if pred.dim() == 1:
+            pred = pred.reshape(-1, 2)
+
+        lower = pred[:, 0]
+        upper = pred[:, 1]
         
         score = upper - lower
         score += (2/self.alpha) * (reel - upper) * (reel > upper)
@@ -39,11 +37,14 @@ class MAE_RMSE_IR(nn.Module):
 
     def forward(self, pred:list[list[float]], reel:list[float]) -> list[float]:
         pred, reel = torch.as_tensor(pred, dtype=torch.float), torch.as_tensor(reel, dtype=torch.float)
+        pred, reel = pred.cpu(), reel.cpu()
         
-        # Ensure reel is 1D to match lower/upper
-        if reel.dim() == 2:
-            reel = reel.squeeze(-1)
-            
+        reel = reel.reshape(-1)
+        if pred.dim() > 2:
+            pred = pred.reshape(pred.shape[0], -1)
+        if pred.dim() == 1:
+            pred = pred.reshape(-1, 2)
+
         lower, upper = pred[:, 0], pred[:, 1]
         center = (lower + upper)/2
         

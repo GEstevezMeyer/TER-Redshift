@@ -12,13 +12,13 @@ conjunctive_start = true
 [training]
 [training.optimizer]
 name = "adamw"
-lr = 0.005
+lr = 0.001
 weight_decay = 0.01
 
 [training.loss]
-name = "interval_rmse"
-mode = "combined"
-eps = 1e-7
+name = "quantile"
+alpha = 0.1
+center_weight = 0.1
 
 [training.metric]
 name = "winkler"

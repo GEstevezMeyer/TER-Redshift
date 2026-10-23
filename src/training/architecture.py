@@ -3,6 +3,20 @@ from torch import Tensor
 import torch.nn as nn 
 import torch.nn.functional as F
 
+def _diff(c: Tensor) -> Tensor:
+    """c[k] - c[k-1], avec c[0] = 0 (dernière dimension)"""
+    zeros = torch.zeros_like(c[..., :1])
+    return c - torch.cat([zeros, c[..., :-1]], dim=-1)
+
+
+class MeanEstim(nn.Module):
+    def forward(self, bounds):
+        low, up = bounds
+        return (low + up) / 2
+
+
+POINT_ESTIM_FUNCTION = {"mean": MeanEstim}
+
 
 
 ACTIVATION_FUNCTION_REGISTERY = {"relu": nn.ReLU,
@@ -19,94 +33,72 @@ ACTIVATION_FUNCTION_REGISTERY = {"relu": nn.ReLU,
     "hardswish": nn.Hardswish,
     "identity": nn.Identity,}
 
-POINT_ESTIM_FUNCTION = {"mean": lambda x,y: (x,y)/2}
 
 class NeuroneMacSum(nn.Module):
-    def __init__(self, n_in:int, n_out:int,conjunctive = True):
+    def __init__(self, n_in: int, n_out: int, conjunctive=True):
         super().__init__()
         self.n_in = n_in
         self.n_out = n_out
-        self.parametres = nn.Parameter(torch.rand(self.n_out, self.n_in)) 
-        self.is_conjunctive = conjunctive  
-
+        std = 1.0 / (n_in ** 0.5)
+        self.parametres = nn.Parameter(torch.empty(n_out, n_in).normal_(0.0, std))
+        self.is_conjunctive = conjunctive
 
     def _mixed(self, x_upper: Tensor, x_lower: Tensor, upper_when_pos: bool):
-            B, K = x_upper.shape
-            mask = (self.parametres.mean(dim=1) < 0).unsqueeze(0) 
-            mask = mask.expand(B, K)
+        B, K = x_upper.shape
+        mask = (self.parametres.mean(dim=1) < 0).unsqueeze(0).expand(B, K)
+        if upper_when_pos:
+            x_sup = torch.where(mask, x_lower, x_upper)
+            x_inf = torch.where(mask, x_upper, x_lower)
+        else:
+            x_sup = torch.where(mask, x_upper, x_lower)
+            x_inf = torch.where(mask, x_lower, x_upper)
+        return x_inf, x_sup
 
-            if upper_when_pos:  
-                x_sup = torch.where(mask, x_lower, x_upper)  
-                x_inf = torch.where(mask, x_upper, x_lower)  
-            else:               
-                x_sup = torch.where(mask, x_upper, x_lower)  
-                x_inf = torch.where(mask, x_lower, x_upper)  
-            return x_inf, x_sup
-    
-    def conjunctive(self, x_upper: Tensor, x_lower: Tensor):
+    def conjunctive(self, x_upper, x_lower):
         return self._mixed(x_upper, x_lower, upper_when_pos=False)
-    
-    def disjunctive(self, x_upper: Tensor, x_lower: Tensor):
+
+    def disjunctive(self, x_upper, x_lower):
         return self._mixed(x_upper, x_lower, upper_when_pos=True)
 
     def forward(self, x):
-        if isinstance(x, tuple):
-            # If x is (low, sup), we usually want to process them separately or use a specific logic.
-            # Given MacSumDenseMinMax's forward, the output of one layer is (low, sup).
-            # The next layer's MacSum expects a single Tensor.
-            # We can't simply pass a tuple to NeuroneMacSum.
-            # However, in the complex architecture, the output of MacSumDenseMinMax 
-            # is passed to the next MacSumDenseMinMax.
-            # We should probably use the midpoint or handle intervals.
-            x = (x[0] + x[1]) / 2
-            
+
         squeeze = x.dim() == 1
         if squeeze:
-            x = x.unsqueeze(0)                                 
+            x = x.unsqueeze(0)                                   
 
         w = self.parametres                                      
 
-      
-        w_dec, _ = torch.sort(w, dim=1, descending=True)
-        w_cro, _ = torch.sort(w, dim=1, descending=False)
-        w_plus = torch.clamp(w_dec, min=0)
-        w_moin = torch.clamp(w_cro, max=0)
-
-       
-        xd, _ = torch.sort(x, dim=1, descending=True)
-        xc, _ =  torch.sort(x, dim=1, descending=False)
-
-        xd_p, xd_m = torch.clamp(xd, min=0), torch.clamp(xd, max=0)
-        xc_p, xc_m = torch.clamp(xc, min=0), torch.clamp(xc, max=0)
-
-        beta_k_sup  = torch.cummax(xd_p, dim=-1).values  + torch.cummax(xd_m, dim=-1).values
-        beta_k_low  = torch.cummax(-xd_p, dim=-1).values + torch.cummax(-xd_m, dim=-1).values
-        gamma_k_sup = torch.cummin(xc_p, dim=-1).values  + torch.cummin(xc_m, dim=-1).values
-        gamma_k_low = torch.cummin(-xc_p, dim=-1).values + torch.cummin(-xc_m, dim=-1).values
-      
-        zeros = torch.zeros_like(beta_k_sup[..., :1])
-        beta_k_1_sup  = torch.cat([zeros, beta_k_sup[..., :-1]],  dim=-1)
-        beta_k_1_low  = torch.cat([zeros, beta_k_low[..., :-1]],  dim=-1)
-        gamma_k_1_sup = torch.cat([zeros, gamma_k_sup[..., :-1]], dim=-1)
-        gamma_k_1_low = torch.cat([zeros, gamma_k_low[..., :-1]], dim=-1)
+        
+        w_plus, idx_d = torch.sort(w.clamp(min=0), dim=1, descending=True)   
+        w_moin, idx_c = torch.sort(w.clamp(max=0), dim=1, descending=False)  
 
         
-        y_sup = (beta_k_sup - beta_k_1_sup) @ w_plus.T   + (gamma_k_sup - gamma_k_1_sup) @ w_moin.T
-        y_low = -((beta_k_low - beta_k_1_low) @ w_plus.T + (gamma_k_low - gamma_k_1_low) @ w_moin.T)
+        xp, xm = x.clamp(min=0), x.clamp(max=0)                 
 
         
+        xp_d, xm_d = xp[:, idx_d], xm[:, idx_d]
+        xp_c, xm_c = xp[:, idx_c], xm[:, idx_c]
+
         
+        beta_sup  = torch.cummax(xp_d, -1).values + torch.cummax(xm_d, -1).values
+        gamma_sup = torch.cummin(xp_c, -1).values + torch.cummin(xm_c, -1).values
+
+        
+        beta_low  = torch.cummin(xp_d, -1).values + torch.cummin(xm_d, -1).values
+        gamma_low = torch.cummax(xp_c, -1).values + torch.cummax(xm_c, -1).values
+
+        
+        y_sup = (w_plus * _diff(beta_sup)).sum(-1) + (w_moin * _diff(gamma_sup)).sum(-1)
+        y_low = (w_plus * _diff(beta_low)).sum(-1) + (w_moin * _diff(gamma_low)).sum(-1)
+
         if self.is_conjunctive:
-            y_low, y_sup = self.conjunctive(y_sup,y_low)
+            y_low, y_sup = self.conjunctive(y_sup, y_low)
         else:
-            y_low,y_sup = self.disjunctive(y_sup,y_low)
-        
+            y_low, y_sup = self.disjunctive(y_sup, y_low)
+
         if squeeze:
             y_low, y_sup = y_low.squeeze(0), y_sup.squeeze(0)
-
-        return y_low, y_sup
-        
-    
+        return y_low, y_sup    
 
 
 class MinMax(nn.Module): 
@@ -152,47 +144,58 @@ class MacSumDenseMinMax(nn.Module):
         listLinear.append(nn.Linear(current_input, output_size))   
 
         self.ForwardPass = nn.Sequential(*listLinear)
+        self.skip = nn.Linear(MacSumIn, output_size)
 
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        for module in self.ForwardPass.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.kaiming_normal_(module.weight, nonlinearity="leaky_relu")
+                nn.init.zeros_(module.bias)
+        nn.init.kaiming_normal_(self.skip.weight, nonlinearity="linear")
+        nn.init.zeros_(self.skip.bias)
 
     def forward(self, x):
         x_low, x_sup = self.MacSum(x)
-        return self.MinMax(self.ForwardPass(x_low), self.ForwardPass(x_sup)) 
+        skip = self.skip(x)
+        low, sup = self.MinMax(self.ForwardPass(x_low), self.ForwardPass(x_sup))
+        return low + skip, sup + skip
 
        
 
-class ArchitectureMacSum(nn.Module): 
-    def __init__(self, input_shape:int,lis_MacSumOut:list[int],lis_output_size:list[int],lis_activation:list[str],
-                 lis_increments:list[int],lis_linears_start:list[int],lis_LinearN:list[int],lis_point_estim_function:list[str],conjunctive_start = True ):
+class ArchitectureMacSum(nn.Module):
+    def __init__(self, input_shape, lis_MacSumOut, lis_output_size, lis_activation,
+                 lis_increments, lis_linears_start, lis_LinearN, lis_point_estim_function,
+                 conjunctive_start=True):
         super().__init__()
 
-        assert all([i in ACTIVATION_FUNCTION_REGISTERY for i in lis_activation]), "one of the activation function is not in the registery"
-        assert all([i in POINT_ESTIM_FUNCTION for i in lis_point_estim_function]), "one of the point estimation function is not in the registery"
-        assert (len(lis_MacSumOut) == len(lis_output_size) == len(lis_activation) == len(lis_increments) 
+        assert all(i in ACTIVATION_FUNCTION_REGISTERY for i in lis_activation), "one of the activation function is not in the registery"
+        assert all(i in POINT_ESTIM_FUNCTION for i in lis_point_estim_function), "one of the point estimation function is not in the registery"
+        assert (len(lis_MacSumOut) == len(lis_output_size) == len(lis_activation) == len(lis_increments)
                 == len(lis_linears_start) == len(lis_point_estim_function) == len(lis_LinearN)), "lenght are not matchable"
 
         self.input_shape = input_shape
-        
         current_input_shape = input_shape
+        blocks = []
+        n = len(lis_MacSumOut)
+        for i, (macsumout, output_size, activation, increments,
+                linears_start, point_estim, linearN) in enumerate(zip(
+                    lis_MacSumOut, lis_output_size, lis_activation, lis_increments,
+                    lis_linears_start, lis_point_estim_function, lis_LinearN)):
 
-        list_MacSumDenseMinMax = []
-
-        
-
-        for (macsumout,output_size,activation,
-        increments,linears_start,point_estim_function,linearN) in zip(lis_MacSumOut,lis_output_size,lis_activation,
-        lis_increments,lis_linears_start,lis_point_estim_function,lis_LinearN):
-            list_MacSumDenseMinMax.append(MacSumDenseMinMax(current_input_shape,macsumout,
-                                                             output_size,linears_start,linearN,increments,activation,conjunctive_start))
+            blocks.append(MacSumDenseMinMax(current_input_shape, macsumout, output_size,
+                                            linears_start, linearN, increments,
+                                            activation, conjunctive_start))
+            if i < n - 1:                                   
+                blocks.append(POINT_ESTIM_FUNCTION[point_estim]())
             current_input_shape = output_size
             conjunctive_start = not conjunctive_start
 
-        self.ForwardPass = nn.Sequential(*list_MacSumDenseMinMax)
+        self.ForwardPass = nn.Sequential(*blocks)
 
-
-
-    def forward(self, x): 
+    def forward(self, x):
         return self.ForwardPass(x)
-
 
 
             

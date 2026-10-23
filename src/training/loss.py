@@ -43,7 +43,6 @@ class IntervalRMSELoss(nn.Module):
     ) -> Tensor:
         preds = (y_low, y_sup)
 
-        # Si target est un tuple (target_low, target_sup) ou un tenseur unique
         if isinstance(target, (tuple, list)):
             t_low, t_sup = target
         else:
@@ -65,7 +64,7 @@ class IntervalRMSELoss(nn.Module):
 
 
 if __name__ == "__main__":
-    # Petit test rapide
+    
     criterion = IntervalRMSELoss(mode="combined")
     
     low = torch.tensor([[0.8], [1.9]], requires_grad=True)
