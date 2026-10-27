@@ -1,28 +1,7 @@
 import torch
 import torch.nn as nn
-from abc import ABC, abstractmethod
-
 import torch.nn.functional as F
 from torch import Tensor
-
-class BaseIntervallLoss(nn.Module, ABC):
-    def __init__(self):
-        super(BaseIntervallLoss, self).__init__()
-
-    @abstractmethod
-    def forward(self, *outputs, target):
-        pass
-
-# Example de susage:
-# class MyIntervallLoss(BaseIntervallLoss):
-#     def __init__(self, alpha=1.0):
-#         super().__init__()
-#         self.alpha = alpha
-#
-#     def forward(self, *outputs, target):
-#         lower, upper = outputs
-#         loss = torch.mean(((lower + upper) / 2 - target)**2) * self.alpha
-#         return loss
 
 
 class RMSELoss(nn.Module):
@@ -58,12 +37,12 @@ class IntervalRMSELoss(nn.Module):
 
     def forward(
         self, 
-        preds: tuple[Tensor, Tensor], 
+        y_low: Tensor, 
+        y_sup: Tensor, 
         target: Tensor | tuple[Tensor, Tensor]
     ) -> Tensor:
-        y_low, y_sup = preds
+        preds = (y_low, y_sup)
 
-        # Si target est un tuple (target_low, target_sup) ou un tenseur unique
         if isinstance(target, (tuple, list)):
             t_low, t_sup = target
         else:
@@ -84,8 +63,75 @@ class IntervalRMSELoss(nn.Module):
             return torch.sqrt(F.mse_loss(y_mid, t_mid) + self.eps)
 
 
+class IntervalQuantileLoss(nn.Module):
+    """Pinball (quantile) loss for interval prediction.
+
+    The lower output is trained as the ``alpha / 2`` quantile and the upper
+    output as the ``1 - alpha / 2`` quantile.  Unlike ``IntervalRMSELoss``,
+    this objective does not force both bounds toward the same point target,
+    so the network has an incentive to produce a non-zero interval width.
+
+    ``alpha`` is the expected miscoverage: ``alpha=0.1`` targets a 90% interval.
+    """
+
+    def __init__(self, alpha: float = 0.1, center_weight: float = 1.0):
+        super().__init__()
+        assert 0.0 < alpha < 1.0, "alpha must be in (0, 1)"
+        self.alpha = alpha
+        self.q_low = alpha / 2.0
+        self.q_high = 1.0 - alpha / 2.0
+        self.center_weight = center_weight
+
+    @staticmethod
+    def _pinball(error: Tensor, q: float) -> Tensor:
+        return torch.maximum(q * error, (q - 1.0) * error)
+
+    def forward(
+        self,
+        y_low: Tensor,
+        y_sup: Tensor,
+        target: Tensor | tuple[Tensor, Tensor],
+    ) -> Tensor:
+        if isinstance(target, (tuple, list)):
+            t_low, t_sup = target
+        else:
+            t_low = t_sup = target
+
+        loss_low = self._pinball(t_low - y_low, self.q_low).mean()
+        loss_sup = self._pinball(t_sup - y_sup, self.q_high).mean()
+        center = 0.5 * (y_low + y_sup)
+        center_loss = torch.mean((center - t_low) ** 2)
+
+        return loss_low + loss_sup + self.center_weight * center_loss
+
+
+class WinklerLoss(nn.Module):
+    """Differentiable version of the Winkler score (lower is better)."""
+
+    def __init__(self, alpha: float = 0.1):
+        super().__init__()
+        assert 0.0 < alpha < 1.0, "alpha must be in (0, 1)"
+        self.alpha = alpha
+
+    def forward(
+        self,
+        y_low: Tensor,
+        y_sup: Tensor,
+        target: Tensor | tuple[Tensor, Tensor],
+    ) -> Tensor:
+        if isinstance(target, (tuple, list)):
+            t_low, t_sup = target
+        else:
+            t_low = t_sup = target
+
+        width = (y_sup - y_low).clamp(min=0.0)
+        above = torch.relu(t_low - y_sup)
+        below = torch.relu(y_low - t_sup)
+        return (width + (2.0 / self.alpha) * (above + below)).mean()
+
+
 if __name__ == "__main__":
-    # Petit test rapide
+    
     criterion = IntervalRMSELoss(mode="combined")
     
     low = torch.tensor([[0.8], [1.9]], requires_grad=True)
