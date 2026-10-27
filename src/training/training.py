@@ -8,9 +8,8 @@ import argparse
 import sys
 import json
 import numpy as np
-from src.training.loss import RMSELoss, IntervalRMSELoss
-from src.training.quantile import IntervalQuantileLoss, WinklerLoss
-from src.training.metric import WinklerScore, MAE_RMSE_IR
+from src.training.loss import RMSELoss, IntervalRMSELoss, IntervalQuantileLoss, WinklerLoss
+from src.training.metric import WinklerScore, MAE_RMSE_IR, IntervalWidth
 
 from tqdm import tqdm
 from src.utils.configs import import_config, return_device
@@ -34,9 +33,9 @@ OPTIMIZER_REGISTRY = {
 }
 
 METRICS_REGISTRY = {
-    "R2": lambda x:x,
     "winkler": WinklerScore,
     "mae_rmse_ir": MAE_RMSE_IR,
+    "width": IntervalWidth,
 }
 
 
@@ -44,8 +43,7 @@ LOSS_REGISTRY = {
     "mse": F.mse_loss,
     "rmse": RMSELoss,
     "interval_rmse": IntervalRMSELoss,
-    "quantile": IntervalQuantileLoss,
-    "pinball": IntervalQuantileLoss,
+    "intervalquantile": IntervalQuantileLoss,
     "winkler_loss": WinklerLoss,
 }
 
@@ -130,9 +128,9 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
 
     loss_res:list[float] = []
     metrics_res:list[float] = []
-    coverage_res:list[float] = []
     width_res:list[float] = []
-    rmse_res:list[float] = []
+
+    width_metric = IntervalWidth()
 
     n_samples = len(training_dataloader.dataset)
     for i in range(epochs):
@@ -148,7 +146,6 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
             optimizer.zero_grad()
 
             outputs = model(x)
-            
             loss = loss_function(*outputs, y)
             loss.backward()
 
@@ -171,7 +168,6 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
                     x_eval = (x_eval - x_mean) / x_std
                     outputs = model(x_eval)
                     pred_low, pred_sup = outputs
-                    # Back to the physical redshift scale for evaluation.
                     pred_low = pred_low * y_std + y_mean
                     pred_sup = pred_sup * y_std + y_mean
                     preds = torch.stack([pred_low, pred_sup], dim=1)
@@ -182,30 +178,18 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
             all_reels = torch.cat(all_reels, dim=0)
             
             metric = metric_function(all_preds, all_reels)
-
-            # Extra diagnostics: interval width, coverage and midpoint RMSE.
-            low = all_preds[:, 0].reshape(-1)
-            sup = all_preds[:, 1].reshape(-1)
-            reel = all_reels.reshape(-1).to(low.device)
-            coverage = ((reel >= low) & (reel <= sup)).float().mean().item()
-            width = (sup - low).mean().item()
-            rmse = torch.sqrt(torch.mean(((low + sup) / 2 - reel) ** 2)).item()
+            width = width_metric(all_preds)
 
             metrics_res.append(metric)
-            coverage_res.append(coverage)
             width_res.append(width)
-            rmse_res.append(rmse)
 
-            print(f"{metric_name}: {metric} | {loss_name}: {epoch_loss:.5f} | "
-                  f"coverage: {coverage:.3f} | width: {width:.4f} | rmse_mid: {rmse:.4f}")
+            print(f"{metric_name}: {metric} | width: {width:.4f} | {loss_name}: {epoch_loss:.5f}")
             model.train()
 
     results = {
         "loss": loss_res,
         "metrics": metrics_res,
-        "coverage": coverage_res,
         "width": width_res,
-        "rmse_mid": rmse_res,
         "config": configs,
         "normalization": {
             "x_mean": stats["x_mean"].tolist(),

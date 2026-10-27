@@ -56,3 +56,26 @@ class MAE_RMSE_IR(nn.Module):
                 MAE[~inside].sum().item()/len(reel), (RMSE[~inside].sum().item()/len(reel))**0.5,
                 inside.float().mean().item()]
 
+
+class IntervalWidth(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, pred: list[list[float]], reel: list[float] = None) -> float:
+        pred = torch.as_tensor(pred, dtype=torch.float)
+        pred = pred.cpu()
+
+        if pred.dim() > 2:
+            pred = pred.reshape(pred.shape[0], -1)
+        if pred.dim() == 1:
+            pred = pred.reshape(-1, 2)
+
+        lower = pred[:, 0]
+        upper = pred[:, 1]
+
+        width = upper - lower
+        return width.mean().item()
+
+
+
+
