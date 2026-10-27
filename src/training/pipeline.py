@@ -6,13 +6,13 @@ TRAINING_DATA_DEFAULT_PATH = "data/epoch_40_train_results.npy"
 VALIDATION_DATA_DEFAULT_PATH = "data/epoch_40_val_results.npy"
 
 TARGET_KEY = "z_true"
-
+LATENT_KEY = "final_latent"
 
 class EspaceLatent(Dataset):
     def __init__(self, path):
         super().__init__()
         data: dict = np.load(path, allow_pickle=True).item()
-        x = np.asarray(data["final_latent"])
+        x = np.asarray(data[LATENT_KEY])
         y = np.asarray(data[TARGET_KEY])
         valid = np.isfinite(y) & (y > 0)
         self.x = x[valid]
