@@ -1,12 +1,11 @@
-import torch 
+import torch
 from torch import Tensor
-import torch.nn as nn 
+import torch.nn as nn
 import torch.nn.functional as F
-from src.training.point_estimator import MeanEstim, MedianEstim
+from src.training.point_estimator import MeanEstim
 
 
-POINT_ESTIM_FUNCTION = {"mean": MeanEstim, 
-                        "median": MedianEstim}
+POINT_ESTIM_FUNCTION = {"mean": MeanEstim}
 
 ACTIVATION_FUNCTION_REGISTERY = {
     "relu": nn.ReLU,
@@ -31,7 +30,6 @@ ACTIVATION_FUNCTION_REGISTERY = {
 class NeuroneMacSum(nn.Module):
     @staticmethod
     def _diff(c: Tensor) -> Tensor:
-        """c[k] - c[k-1], avec c[0] = 0 (dernière dimension)"""
         zeros = torch.zeros_like(c[..., :1])
         return c - torch.cat([zeros, c[..., :-1]], dim=-1)
 

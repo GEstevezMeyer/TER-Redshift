@@ -140,9 +140,6 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
             x = x.to(device)
             y = y.to(device)
 
-            x = (x - x_mean) / x_std
-            y = (y - y_mean) / y_std
-
             optimizer.zero_grad()
 
             outputs = model(x)
@@ -165,14 +162,14 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
             with torch.no_grad():
                 for x_eval, y_eval in eval_dataloader:
                     x_eval = x_eval.to(device)
-                    x_eval = (x_eval - x_mean) / x_std
+                    y_eval = y_eval.to(device)
                     outputs = model(x_eval)
                     pred_low, pred_sup = outputs
                     pred_low = pred_low * y_std + y_mean
                     pred_sup = pred_sup * y_std + y_mean
                     preds = torch.stack([pred_low, pred_sup], dim=1)
-                    all_preds.append(preds)
-                    all_reels.append(y_eval)
+                    all_preds.append(preds.cpu())
+                    all_reels.append((y_eval * y_std + y_mean).cpu())
             
             all_preds = torch.cat(all_preds, dim=0)
             all_reels = torch.cat(all_reels, dim=0)
