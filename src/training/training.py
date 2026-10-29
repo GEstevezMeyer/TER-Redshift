@@ -8,7 +8,7 @@ import argparse
 import sys
 import json
 import numpy as np
-from src.training.loss import RMSELoss, IntervalRMSELoss, IntervalQuantileLoss, WinklerLoss,SWRMSE_WS,SWRMSE_RMSEb
+from src.training.loss import RMSELoss, IntervalRMSELoss, IntervalQuantileLoss, WinklerLoss,SWRMSE_WS,SWRMSE_RMSEb, WorstBound_RMSE
 from src.training.metric import WinklerScore, GeneralMetricsEvaluation, IntervalWidth
 
 from tqdm import tqdm
@@ -44,7 +44,8 @@ LOSS_REGISTRY = {
     "intervalquantile": IntervalQuantileLoss,
     "winkler_loss": WinklerLoss,
     "SWRMSE_WS":SWRMSE_WS,
-    "SWRMSE_RMSEb": SWRMSE_RMSEb
+    "SWRMSE_RMSEb": SWRMSE_RMSEb,
+    "WorstBound_RMSE": WorstBound_RMSE
 }
 
 

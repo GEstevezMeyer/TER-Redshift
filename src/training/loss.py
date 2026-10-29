@@ -176,6 +176,24 @@ class SWRMSE_RMSEb(nn.Module):
 
         return loss_per_sample.mean()
 
+class WorstBound_RMSE(nn.Module): 
+    def __init__(self,eps):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self,y_low,y_sup,y_true) -> float:
+
+        if y_true.dim() == 1:
+            y_true = y_true.unsqueeze(1)
+        if y_low.dim() == 1:
+            y_low = y_low.unsqueeze(1)
+        if y_sup.dim() == 1:
+            y_sup = y_sup.unsqueeze(1)
+
+        rmse_low = torch.sqrt((y_true -y_low) ** 2 + self.eps)
+        rmse_sup = torch.sqrt((y_true - y_sup)**2 + self.eps)
+
+        return torch.maximum(rmse_low,rmse_sup).mean()
 
 
 
