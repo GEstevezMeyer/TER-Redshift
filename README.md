@@ -15,3 +15,5 @@ Train with:
 ```bash
 python -m src.training.training --config configs/config_training_1.toml --epochs 10
 ```
+
+test
