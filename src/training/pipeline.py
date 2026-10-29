@@ -45,6 +45,13 @@ class EspaceLatent(Dataset):
         y = (y - self.y_mean) / self.y_std
         return x, y
 
+    @property
+    def mean(self):
+        return self.x_mean.tolist(), self.y_mean.tolist()
+
+    @property
+    def std(self):
+        return self.x_std.tolist(),self.y_std.tolist()
 
 def main_pipeline(batch_size: int) -> tuple[DataLoader, DataLoader]:
     training_dataset = EspaceLatent(TRAINING_DATA_DEFAULT_PATH)

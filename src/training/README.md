@@ -4,7 +4,7 @@
 - `architecture.py` - MacSum neural network architectures
 - `training.py` - Training loop
 - `loss.py` - Loss functions (RMSE, IntervalRMSE, IntervalQuantile, Winkler)
-- `metric.py` - Evaluation metrics (WinklerScore, MAE_RMSE_IR, IntervalWidth)
+- `metric.py` - Evaluation metrics (WinklerScore, GeneralMetricsEvaluation, IntervalWidth)
 - `pipeline.py` - Data loading and preprocessing
 - `point_estimator.py` - Point estimation layers
 - `utils.py` - Training utilities
