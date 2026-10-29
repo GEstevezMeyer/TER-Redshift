@@ -41,7 +41,6 @@ class IntervalRMSELoss(nn.Module):
         y_sup: Tensor, 
         target: Tensor | tuple[Tensor, Tensor]
     ) -> Tensor:
-        preds = (y_low, y_sup)
 
         if isinstance(target, (tuple, list)):
             t_low, t_sup = target
@@ -128,6 +127,75 @@ class WinklerLoss(nn.Module):
         above = torch.relu(t_low - y_sup)
         below = torch.relu(y_low - t_sup)
         return (width + (2.0 / self.alpha) * (above + below)).mean()
+
+
+class SWRMSE_WS(nn.Module):
+    def __init__(self, eps=1e-8):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, y_low, y_sup, y_true):
+        if y_true.dim() == 1:
+            y_true = y_true.unsqueeze(1)
+        if y_low.dim() == 1:
+            y_low = y_low.unsqueeze(1)
+        if y_sup.dim() == 1:
+            y_sup = y_sup.unsqueeze(1)
+
+        ir_i = (y_true >= y_low) & (y_true <= y_sup)
+        width = torch.abs(y_sup - y_low)
+        center = (y_low + y_sup) / 2.0
+        rmse_per_sample = torch.sqrt((y_true - center) ** 2 + self.eps)
+
+        loss_per_sample = torch.where(ir_i, width, rmse_per_sample)
+
+        return loss_per_sample.mean()
+
+class SWRMSE_RMSEb(nn.Module):
+    def __init__(self, eps=1e-8):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, y_low, y_sup, y_true):
+        if y_true.dim() == 1:
+            y_true = y_true.unsqueeze(1)
+        if y_low.dim() == 1:
+            y_low = y_low.unsqueeze(1)
+        if y_sup.dim() == 1:
+            y_sup = y_sup.unsqueeze(1)
+
+        ir_i = (y_true >= y_low) & (y_true <= y_sup)
+        
+        
+        center = (y_low + y_sup) / 2.0
+        rmse_center = torch.sqrt((y_true - center) ** 2 + self.eps)
+
+
+        rmseb = torch.sqrt((((y_true - y_low) ** 2 + (y_true - y_sup) ** 2) / 2.0) + self.eps)
+        loss_per_sample = torch.where(ir_i, rmseb, rmse_center)
+
+        return loss_per_sample.mean()
+
+class WorstBound_RMSE(nn.Module): 
+    def __init__(self,eps):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self,y_low,y_sup,y_true) -> float:
+
+        if y_true.dim() == 1:
+            y_true = y_true.unsqueeze(1)
+        if y_low.dim() == 1:
+            y_low = y_low.unsqueeze(1)
+        if y_sup.dim() == 1:
+            y_sup = y_sup.unsqueeze(1)
+
+        rmse_low = torch.sqrt((y_true -y_low) ** 2 + self.eps)
+        rmse_sup = torch.sqrt((y_true - y_sup)**2 + self.eps)
+
+        return torch.maximum(rmse_low,rmse_sup).mean()
+
+
 
 
 if __name__ == "__main__":
