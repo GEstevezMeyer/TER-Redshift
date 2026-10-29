@@ -9,7 +9,7 @@ import sys
 import json
 import numpy as np
 from src.training.loss import RMSELoss, IntervalRMSELoss, IntervalQuantileLoss, WinklerLoss
-from src.training.metric import WinklerScore, MAE_RMSE_IR, IntervalWidth
+from src.training.metric import WinklerScore, GeneralMetricsEvaluation, IntervalWidth
 
 from tqdm import tqdm
 from src.utils.configs import import_config, return_device
@@ -108,7 +108,7 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
     loss_name,loss_function = get_loss(configs_training["loss"])
     metric_name,metric_function = get_metric(configs_training["metric"])
     width_metric = IntervalWidth()
-    mae_rse_ir_metric = MAE_RMSE_IR()
+    general_metrics_metric = GeneralMetricsEvaluation()
 
     loss_res:list[float] = []
     metrics_res:list[float] = []
@@ -163,7 +163,7 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
             
             metric = metric_function(all_preds, all_reels)
             width = width_metric(all_preds)
-            mae,rmse,oob_mae, oob_rmse,ir = mae_rse_ir_metric(all_preds,all_reels)
+            mae,rmse,oob_mae, oob_rmse,ir = general_metrics_metric(all_preds,all_reels)
             metrics_res.append(metric)
             width_res.append(width)
             mae_res.append(mae)

@@ -30,7 +30,7 @@ class WinklerScore(nn.Module):
         return score.mean().item()
 
 
-class MAE_RMSE_IR(nn.Module):
+class GeneralMetricsEvaluation(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
