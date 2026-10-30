@@ -16,7 +16,7 @@ lis_linears_start = [256, 64, 32, 16]
 lis_LinearN = [3, 2, 1, 1]
 
 
-lis_point_estim_function = ["mean", "mean", "mean", "mean"]
+
 
 
 [training]

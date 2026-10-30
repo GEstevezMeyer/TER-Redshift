@@ -24,11 +24,20 @@ ACTIVATION_FUNCTION_REGISTERY = {
 }
 
 
+
 class NeuroneMacSum(nn.Module):
     @staticmethod
     def _diff(c: Tensor) -> Tensor:
         zeros = torch.zeros_like(c[..., :1])
         return c - torch.cat([zeros, c[..., :-1]], dim=-1)
+
+    @staticmethod
+    def _reorder(x: Tensor, idx: Tensor) -> Tensor:
+        return x.gather(2, idx.unsqueeze(0).expand(x.shape[0], -1, -1))
+
+    @staticmethod
+    def _dot(w: Tensor, d: Tensor) -> Tensor:
+        return (w.unsqueeze(-2) @ d.unsqueeze(-1)).squeeze(-1).squeeze(-1)
 
     def __init__(self, n_in: int, n_out: int):
         super().__init__()
@@ -58,25 +67,118 @@ class NeuroneMacSum(nn.Module):
         beta_low = torch.cummin(xp_d, -1).values + torch.cummin(xm_d, -1).values
         gamma_low = torch.cummax(xp_c, -1).values + torch.cummax(xm_c, -1).values
 
-        y_sup = (w_plus * self._diff(beta_sup)).sum(-1) + (w_moin * self._diff(gamma_sup)).sum(-1)
-        y_low = (w_plus * self._diff(beta_low)).sum(-1) + (w_moin * self._diff(gamma_low)).sum(-1)
+        y_sup = self._dot(w_plus, self._diff(beta_sup)) + self._dot(w_moin, self._diff(gamma_sup))
+        y_low = self._dot(w_plus, self._diff(beta_low)) + self._dot(w_moin, self._diff(gamma_low))
 
         if squeeze:
             y_low, y_sup = y_low.squeeze(0), y_sup.squeeze(0)
         return y_low, y_sup
 
 
-class MinMax(nn.Module):
-    def __init__(self):
-        super().__init__()
+class ConjunctiveExtension(NeuroneMacSum):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
+    def forward(self, x_low: torch.Tensor, x_sup: torch.Tensor):
+        squeeze = x_low.dim() == 1
+        if squeeze:
+            x_low = x_low.unsqueeze(0)
+            x_sup = x_sup.unsqueeze(0)
+
+        w = self.parametres
+
+        with torch.no_grad():
+            mask_neg = (w < 0).unsqueeze(0)
+
+        x_lower_exp = x_low.unsqueeze(1)
+        x_upper_exp = x_sup.unsqueeze(1)
+
+        x_star = torch.where(mask_neg, x_lower_exp, x_upper_exp)
+        x_star_lower = torch.where(mask_neg, x_upper_exp, x_lower_exp)
+
+        w_plus, idx_d = torch.sort(w.clamp(min=0.0), dim=1, descending=True)
+        w_moin, idx_c = torch.sort(w.clamp(max=0.0), dim=1, descending=False)
+
+        xp_star, xm_star = x_star.clamp(min=0.0), x_star.clamp(max=0.0)
+        xp_star_low, xm_star_low = x_star_lower.clamp(min=0.0), x_star_lower.clamp(max=0.0)
+
+        xp_d = self._reorder(xp_star, idx_d)
+        xm_d = self._reorder(xm_star, idx_d)
+
+        xp_c_low = self._reorder(xp_star_low, idx_c)
+        xm_c_low = self._reorder(xm_star_low, idx_c)
+
+        beta_low = torch.cummin(xp_d, -1).values + torch.cummin(xm_d, -1).values
+        gamma_sup = torch.cummin(xp_c_low, -1).values + torch.cummin(xm_c_low, -1).values
+
+        y1_low = self._dot(w_plus, self._diff(beta_low))
+        y2_sup = self._dot(w_moin, self._diff(gamma_sup))
+
+        y_low = torch.minimum(y1_low, y2_sup)
+        y_sup = torch.maximum(y1_low, y2_sup)
+
+        if squeeze:
+            y_low, y_sup = y_low.squeeze(0), y_sup.squeeze(0)
+
+        return y_low, y_sup
+
+
+class DisjunctiveExtension(NeuroneMacSum):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, x_low: torch.Tensor, x_sup: torch.Tensor):
+        squeeze = x_low.dim() == 1
+        if squeeze:
+            x_low = x_low.unsqueeze(0)
+            x_sup = x_sup.unsqueeze(0)
+
+        w = self.parametres
+
+        with torch.no_grad():
+            mask_neg = (w < 0).unsqueeze(0)
+
+        x_lower_exp = x_low.unsqueeze(1)
+        x_upper_exp = x_sup.unsqueeze(1)
+
+        x_star = torch.where(mask_neg, x_lower_exp, x_upper_exp)
+        x_star_lower = torch.where(mask_neg, x_upper_exp, x_lower_exp)
+
+        w_plus, idx_d = torch.sort(w.clamp(min=0.0), dim=1, descending=True)
+        w_moin, idx_c = torch.sort(w.clamp(max=0.0), dim=1, descending=False)
+
+        xp_star, xm_star = x_star.clamp(min=0.0), x_star.clamp(max=0.0)
+        xp_star_low, xm_star_low = x_star_lower.clamp(min=0.0), x_star_lower.clamp(max=0.0)
+
+        xp_c = self._reorder(xp_star, idx_c)
+        xm_c = self._reorder(xm_star, idx_c)
+
+        xp_d_low = self._reorder(xp_star_low, idx_d)
+        xm_d_low = self._reorder(xm_star_low, idx_d)
+
+        beta_low = torch.cummin(xp_d_low, -1).values + torch.cummin(xm_d_low, -1).values
+        gamma_sup = torch.cummin(xp_c, -1).values + torch.cummin(xm_c, -1).values
+
+        y1_low = self._dot(w_plus, self._diff(beta_low))
+        y2_sup = self._dot(w_moin, self._diff(gamma_sup))
+
+        y_low = torch.minimum(y1_low, y2_sup)
+        y_sup = torch.maximum(y1_low, y2_sup)
+
+        if squeeze:
+            y_low, y_sup = y_low.squeeze(0), y_sup.squeeze(0)
+
+        return y_low, y_sup
+
+class MinMax(nn.Module):
     def forward(self, a, b):
         return torch.minimum(a, b), torch.maximum(a, b)
 
 
 class MacSumDenseMinMax(nn.Module):
     def __init__(self, MacSumIn: int, MacSumOut: int, output_size: int, linearStart: int,
-                 linearN: int, increment: int, activation_function: str = "relu"):
+                 linearN: int, increment: int, extension_type: str = "point", 
+                 activation_function: str = "relu"):
         super().__init__()
         self.MacSumIn = MacSumIn
         self.MacSumOut = MacSumOut
@@ -84,6 +186,7 @@ class MacSumDenseMinMax(nn.Module):
         self.linearN = linearN
         self.increment = increment
         self.output_size = output_size
+        self.extension_type = extension_type
 
         last_size = MacSumOut - increment * linearN * (linearN + 1) // 2
 
@@ -94,7 +197,15 @@ class MacSumDenseMinMax(nn.Module):
         assert output_size >= 1, "output_size must be positive"
         assert output_size <= last_size, "output size can't be bigger than the last linear layer input size"
 
-        self.MacSum = NeuroneMacSum(self.MacSumIn, self.MacSumOut)
+        if extension_type == "point":
+            self.MacSum = NeuroneMacSum(self.MacSumIn, self.MacSumOut)
+        elif extension_type == "disjunctive":
+            self.MacSum = DisjunctiveExtension(self.MacSumIn, self.MacSumOut)
+        elif extension_type == "conjunctive":
+            self.MacSum = ConjunctiveExtension(self.MacSumIn, self.MacSumOut)
+        else:
+            raise ValueError(f"Unknown extension_type: {extension_type}")
+
         self.MinMax = MinMax()
         self.activation_function = ACTIVATION_FUNCTION_REGISTERY[activation_function]
 
@@ -121,43 +232,74 @@ class MacSumDenseMinMax(nn.Module):
         nn.init.kaiming_normal_(self.skip.weight, nonlinearity="linear")
         nn.init.zeros_(self.skip.bias)
 
-    def forward(self, x):
-        x_low, x_sup = self.MacSum(x)
-        skip = self.skip(x)
-        low, sup = self.MinMax(self.ForwardPass(x_low), self.ForwardPass(x_sup))
-        return low + skip, sup + skip
+    def forward(self, x_low: torch.Tensor, x_sup: torch.Tensor = None):
+        if self.extension_type == "point":
+            x_low_mac, x_sup_mac = self.MacSum(x_low)
+            skip_out = self.skip(x_low)
+            low_pass, sup_pass = self.MinMax(self.ForwardPass(x_low_mac), self.ForwardPass(x_sup_mac))
+            return low_pass + skip_out, sup_pass + skip_out
+        else:
+            x_low_mac, x_sup_mac = self.MacSum(x_low, x_sup)
+            
+            skip_low = self.skip(x_low)
+            skip_sup = self.skip(x_sup)
+            
+            low_pass, sup_pass = self.MinMax(self.ForwardPass(x_low_mac), self.ForwardPass(x_sup_mac))
+            
+            low = torch.minimum(low_pass + skip_low, low_pass + skip_sup)
+            sup = torch.maximum(sup_pass + skip_low, sup_pass + skip_sup)
+            
+            return low, sup
 
 
 class ArchitectureMacSum(nn.Module):
     def __init__(self, input_shape, lis_MacSumOut, lis_output_size, lis_activation,
-                 lis_increments, lis_linears_start, lis_LinearN, lis_point_estim_function):
+                 lis_increments, lis_linears_start, lis_LinearN):
         super().__init__()
 
         assert all(i in ACTIVATION_FUNCTION_REGISTERY for i in lis_activation), "one of the activation function is not in the registery"
-        assert all(i in POINT_ESTIM_FUNCTION for i in lis_point_estim_function), "one of the point estimation function is not in the registery"
         assert (len(lis_MacSumOut) == len(lis_output_size) == len(lis_activation) == len(lis_increments)
-                == len(lis_linears_start) == len(lis_point_estim_function) == len(lis_LinearN)), "lenght are not matchable"
+                == len(lis_linears_start) == len(lis_LinearN)), "lengths do not match"
 
         self.input_shape = input_shape
         current_input_shape = input_shape
-        blocks = []
-        n = len(lis_MacSumOut)
-        for i, (macsumout, output_size, activation, increments,
-                linears_start, point_estim, linearN) in enumerate(zip(
-                    lis_MacSumOut, lis_output_size, lis_activation, lis_increments,
-                    lis_linears_start, lis_point_estim_function, lis_LinearN)):
+        self.blocks = nn.ModuleList()
 
-            blocks.append(MacSumDenseMinMax(current_input_shape, macsumout, output_size,
-                                            linears_start, linearN, increments,
-                                            activation))
-            if i < n - 1:
-                blocks.append(POINT_ESTIM_FUNCTION[point_estim]())
+        for i, (macsumout, output_size, activation, increments,
+                linears_start, linearN) in enumerate(zip(
+                    lis_MacSumOut, lis_output_size, lis_activation, lis_increments,
+                    lis_linears_start, lis_LinearN)):
+
+            if i == 0:
+                extension_type = "point"
+            elif i % 2 == 1:
+                extension_type = "disjunctive"
+            else:
+                extension_type = "conjunctive"
+
+            self.blocks.append(
+                MacSumDenseMinMax(
+                    MacSumIn=current_input_shape,
+                    MacSumOut=macsumout,
+                    output_size=output_size,
+                    linearStart=linears_start,
+                    linearN=linearN,
+                    increment=increments,
+                    extension_type=extension_type,
+                    activation_function=activation
+                )
+            )
             current_input_shape = output_size
 
-        self.ForwardPass = nn.Sequential(*blocks)
+    def forward(self, x: torch.Tensor, x_sup: torch.Tensor = None):
+        x_low = x
+        for i, block in enumerate(self.blocks):
+            if i == 0:
+                x_low, x_sup = block(x_low)
+            else:
+                x_low, x_sup = block(x_low, x_sup)
 
-    def forward(self, x):
-        return self.ForwardPass(x)
+        return x_low, x_sup
 
 
 if __name__ == "__main__":
