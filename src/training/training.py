@@ -8,8 +8,8 @@ import argparse
 import sys
 import json
 import numpy as np
-from src.training.loss import RMSELoss, IntervalRMSELoss, IntervalQuantileLoss, WinklerLoss
-from src.training.metric import WinklerScore, MAE_RMSE_IR, IntervalWidth
+from src.training.loss import RMSELoss, IntervalRMSELoss, IntervalQuantileLoss, WinklerLoss,SWRMSE_WS,SWRMSE_RMSEb, WorstBound_RMSE
+from src.training.metric import WinklerScore, GeneralMetricsEvaluation, IntervalWidth
 
 from tqdm import tqdm
 from src.utils.configs import import_config, return_device
@@ -34,8 +34,6 @@ OPTIMIZER_REGISTRY = {
 
 METRICS_REGISTRY = {
     "winkler": WinklerScore,
-    "mae_rmse_ir": MAE_RMSE_IR,
-    "width": IntervalWidth,
 }
 
 
@@ -45,6 +43,9 @@ LOSS_REGISTRY = {
     "interval_rmse": IntervalRMSELoss,
     "intervalquantile": IntervalQuantileLoss,
     "winkler_loss": WinklerLoss,
+    "SWRMSE_WS":SWRMSE_WS,
+    "SWRMSE_RMSEb": SWRMSE_RMSEb,
+    "WorstBound_RMSE": WorstBound_RMSE
 }
 
 
@@ -84,22 +85,6 @@ def build_MacSumIntervallArchitecture_model(configs_model: dict[str, any]) -> Ar
     return ArchitectureMacSum(**configs_model)
 
 
-def _dataset_statistics(dataloader: DataLoader) -> dict[str, torch.Tensor]:
-    """Compute input/target normalisation statistics from the training set."""
-    dataset = dataloader.dataset
-    x = np.asarray(dataset.final_latent)
-    y = np.asarray(dataset.targets)
-
-    x_mean = x.mean(axis=0)
-    x_std = x.std(axis=0)
-    x_std = np.where(x_std < 1e-6, 1.0, x_std)
-
-    return {
-        "x_mean": torch.tensor(x_mean, dtype=torch.float32),
-        "x_std": torch.tensor(x_std, dtype=torch.float32),
-        "y_mean": torch.tensor(float(y.mean()), dtype=torch.float32),
-        "y_std": torch.tensor(float(y.std()) or 1.0, dtype=torch.float32),
-    }
 
 
 def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:DataLoader,eval_frequency:int,epochs:int,run_name:str = "results") -> ArchitectureMacSum:
@@ -116,21 +101,28 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
     model = model.to(device)
     model = model.train()
 
-    stats = _dataset_statistics(training_dataloader)
-    x_mean = stats["x_mean"].to(device)
-    x_std = stats["x_std"].to(device)
-    y_mean = stats["y_mean"].to(device)
-    y_std = stats["y_std"].to(device)
+    training_dataset = training_dataloader.dataset
+    
+
+    x_mean,y_mean = training_dataset.mean
+    x_std,y_std = training_dataset.std
 
     optimizer:Callable = get_optimizer(model.parameters(), configs_training["optimizer"])
     loss_name,loss_function = get_loss(configs_training["loss"])
     metric_name,metric_function = get_metric(configs_training["metric"])
+    width_metric = IntervalWidth()
+    general_metrics_metric = GeneralMetricsEvaluation()
 
     loss_res:list[float] = []
     metrics_res:list[float] = []
     width_res:list[float] = []
+    mae_res:list[float] = []
+    rmse_res:list[float] = []
+    ir_res:list[float] = []
+    oob_mae_res:list[float] = []
+    oob_rmse_res:list[float] = []
 
-    width_metric = IntervalWidth()
+    
 
     n_samples = len(training_dataloader.dataset)
     for i in range(epochs):
@@ -165,34 +157,42 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
                     y_eval = y_eval.to(device)
                     outputs = model(x_eval)
                     pred_low, pred_sup = outputs
-                    pred_low = pred_low * y_std + y_mean
-                    pred_sup = pred_sup * y_std + y_mean
                     preds = torch.stack([pred_low, pred_sup], dim=1)
                     all_preds.append(preds.cpu())
-                    all_reels.append((y_eval * y_std + y_mean).cpu())
+                    all_reels.append(y_eval.cpu())
             
             all_preds = torch.cat(all_preds, dim=0)
             all_reels = torch.cat(all_reels, dim=0)
             
             metric = metric_function(all_preds, all_reels)
             width = width_metric(all_preds)
-
+            mae,rmse,oob_mae, oob_rmse,ir = general_metrics_metric(all_preds,all_reels)
             metrics_res.append(metric)
             width_res.append(width)
+            mae_res.append(mae)
+            rmse_res.append(rmse)
+            ir_res.append(ir)
+            oob_mae_res.append(oob_mae)
+            oob_rmse_res.append(oob_rmse)
 
-            print(f"{metric_name}: {metric} | width: {width:.4f} | {loss_name}: {epoch_loss:.5f}")
+            print(f"{metric_name}: {metric} | width: {width:.4f} | {loss_name}: {epoch_loss:.5f}| | ir: {ir:.4f} | mae: {mae:.4f}| | rmse: {rmse:.4f}")
             model.train()
 
     results = {
         "loss": loss_res,
         "metrics": metrics_res,
         "width": width_res,
+        "mae":mae_res,
+        "rmse":rmse_res,
+        "ir":ir_res,
+        "oob_mae":oob_mae_res,
+        "oob_rmse":oob_rmse_res,
         "config": configs,
         "normalization": {
-            "x_mean": stats["x_mean"].tolist(),
-            "x_std": stats["x_std"].tolist(),
-            "y_mean": float(stats["y_mean"]),
-            "y_std": float(stats["y_std"]),
+            "x_mean": x_mean,
+            "x_std": x_std,
+            "y_mean": y_mean,
+            "y_std": y_std,
         },
     }
     save_results(results, model, run_name)

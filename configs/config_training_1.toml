@@ -2,12 +2,12 @@
 input_shape = 1024
 lis_MacSumOut = [128, 64, 32]
 lis_output_size = [32, 16, 1]
-lis_activation = ["leaky_relu", "gelu", "relu"]
+lis_activation = ["leaky_relu", "leaky_relu", "leaky_relu"]
 lis_increments = [2, 1, 1]
 lis_linears_start = [128, 32, 16]
 lis_LinearN = [3, 2, 1]
 lis_point_estim_function = ["mean", "mean", "mean"]
-conjunctive_start = true
+
 
 [training]
 [training.optimizer]
@@ -16,9 +16,9 @@ lr = 0.001
 weight_decay = 0.01
 
 [training.loss]
-name = "intervalquantile"
-alpha = 0.1
-center_weight = 0.1
+name = "SWRMSE_RMSEb"
+eps = 0.00001
+
 
 [training.metric]
 name = "winkler"

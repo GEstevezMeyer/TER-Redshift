@@ -9,3 +9,4 @@ Ressources/
 .agents/
 res/
 res_plots/
+.pytest_cache 

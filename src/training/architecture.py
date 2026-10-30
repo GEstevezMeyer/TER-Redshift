@@ -130,8 +130,7 @@ class MacSumDenseMinMax(nn.Module):
 
 class ArchitectureMacSum(nn.Module):
     def __init__(self, input_shape, lis_MacSumOut, lis_output_size, lis_activation,
-                 lis_increments, lis_linears_start, lis_LinearN, lis_point_estim_function,
-                 conjunctive_start=True):
+                 lis_increments, lis_linears_start, lis_LinearN, lis_point_estim_function):
         super().__init__()
 
         assert all(i in ACTIVATION_FUNCTION_REGISTERY for i in lis_activation), "one of the activation function is not in the registery"
