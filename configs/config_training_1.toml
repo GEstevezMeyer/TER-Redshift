@@ -7,7 +7,7 @@ lis_increments = [2, 1, 1]
 lis_linears_start = [128, 32, 16]
 lis_LinearN = [3, 2, 1]
 lis_point_estim_function = ["mean", "mean", "mean"]
-
+conjunctive_start = true
 
 [training]
 [training.optimizer]
