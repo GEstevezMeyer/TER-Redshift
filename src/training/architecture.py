@@ -176,6 +176,13 @@ class MinMax(nn.Module):
 
 
 class MacSumDenseMinMax(nn.Module):
+    def reset_parameters(self):
+        for module in self.ForwardPass.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.kaiming_normal_(module.weight, nonlinearity="leaky_relu")
+                nn.init.zeros_(module.bias)
+
+
     def __init__(self, MacSumIn: int, MacSumOut: int, output_size: int, linearStart: int,
                  linearN: int, increment: int, extension_type: str = "point", 
                  activation_function: str = "relu"):
@@ -220,36 +227,22 @@ class MacSumDenseMinMax(nn.Module):
         listLinear.append(nn.Linear(current_input, output_size))
 
         self.ForwardPass = nn.Sequential(*listLinear)
-        self.skip = nn.Linear(MacSumIn, output_size)
 
         self.reset_parameters()
 
-    def reset_parameters(self):
-        for module in self.ForwardPass.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.kaiming_normal_(module.weight, nonlinearity="leaky_relu")
-                nn.init.zeros_(module.bias)
-        nn.init.kaiming_normal_(self.skip.weight, nonlinearity="linear")
-        nn.init.zeros_(self.skip.bias)
+        
+        
 
     def forward(self, x_low: torch.Tensor, x_sup: torch.Tensor = None):
         if self.extension_type == "point":
             x_low_mac, x_sup_mac = self.MacSum(x_low)
-            skip_out = self.skip(x_low)
             low_pass, sup_pass = self.MinMax(self.ForwardPass(x_low_mac), self.ForwardPass(x_sup_mac))
-            return low_pass + skip_out, sup_pass + skip_out
+            return low_pass , sup_pass
         else:
             x_low_mac, x_sup_mac = self.MacSum(x_low, x_sup)
-            
-            skip_low = self.skip(x_low)
-            skip_sup = self.skip(x_sup)
-            
             low_pass, sup_pass = self.MinMax(self.ForwardPass(x_low_mac), self.ForwardPass(x_sup_mac))
-            
-            low = torch.minimum(low_pass + skip_low, low_pass + skip_sup)
-            sup = torch.maximum(sup_pass + skip_low, sup_pass + skip_sup)
-            
-            return low, sup
+
+            return low_pass, sup_pass
 
 
 class ArchitectureMacSum(nn.Module):

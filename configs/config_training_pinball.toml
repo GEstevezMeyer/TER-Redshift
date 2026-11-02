@@ -1,0 +1,32 @@
+[model]
+input_shape = 1024
+
+lis_MacSumOut = [256, 128, 64, 32]
+lis_output_size = [64, 32, 16, 1]
+
+lis_activation = ["leaky_relu", "leaky_relu", "leaky_relu", "leaky_relu"]
+
+lis_increments = [4, 2, 2, 1]
+
+lis_linears_start = [256, 64, 32, 16]
+lis_LinearN = [3, 2, 1, 1]
+
+
+[training]
+[training.optimizer]
+name = "adamw"
+lr = 0.001
+weight_decay = 0.001
+
+[training.scheduler]
+name = "cosineannealinglr"
+eta_min = 0.00001
+
+[training.loss]
+name = "pinball"
+alpha = 0.1
+center_weight = 1.0
+
+[training.metric]
+name = "winkler"
+alpha = 0.1

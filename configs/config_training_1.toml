@@ -14,6 +14,11 @@ name = "adamw"
 lr = 0.001
 weight_decay = 0.01
 
+[training.scheduler]
+name = "step"
+gamma = 0.1
+min_lr = 0.00001
+
 [training.loss]
 name = "SWRMSE_RMSEb"
 eps = 0.00001
