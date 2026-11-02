@@ -8,10 +8,8 @@
 - `pipeline.py` - Data loading and preprocessing
 - `point_estimator.py` - Point estimation layers
 - `utils.py` - Training utilities
-- `process_data.py` - Data processing
-- `latent_representation.py` - Latent representations
-- `space_representation.py` - Space representations
-- `pca.py` - PCA utilities
+
+
 
 ## Usage
 Use configs in `configs/` to train models.
