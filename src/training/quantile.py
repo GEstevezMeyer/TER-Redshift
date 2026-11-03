@@ -1,5 +1,6 @@
 import numpy as np
 import lightgbm as lgb
+import xgboost as xgb
 
 class BaselineHistorique:
     def __init__(self, couverture:float) -> None:
@@ -59,6 +60,33 @@ class BaselineLightGBM:
         return preds
     
 
+class BaselineXGBoost:
+    def __init__(self, couverture: float) -> None:
+        self.couverture = couverture
+
+        self.q_low = (1 - self.couverture) / 2
+        self.q_up = 1 - self.q_low
+
+        self.model = xgb.XGBRegressor(
+            objective="reg:quantileerror",
+            quantile_alpha=np.array([self.q_low, self.q_up])
+        )
+
+    def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> "BaselineXGBoost":
+        self.model.fit(X_train, y_train)
+
+        return self
+
+    # Comme le modèle prédit les 2 bornes d'un seul coup, on obtient un tableau (n, 2) :
+    # colonne 0 = q_low, colonne 1 = q_up
+    def predict(self, X_test: np.ndarray) -> np.ndarray:
+        preds = self.model.predict(X_test)
+
+        pred_low, pred_up = np.minimum(preds[:, 0], preds[:, 1]), np.maximum(preds[:, 0], preds[:, 1])
+
+        return np.stack([pred_low, pred_up], axis=1)
+
+
 if __name__ == "__main__":
     # Test avec des donnees factices
     np.random.seed(42)
@@ -70,6 +98,7 @@ if __name__ == "__main__":
     modeles = {
         "BaselineHistorique": BaselineHistorique(couverture=0.9).fit(y_train),
         "BaselineLightGBM": BaselineLightGBM(couverture=0.9, verbose=-1).fit(X_train, y_train),
+        "BaselineXGBoost": BaselineXGBoost(couverture=0.9).fit(X_train, y_train),
     }
 
     for nom, modele in modeles.items():
