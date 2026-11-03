@@ -7,7 +7,6 @@
 - `metric.py` - Evaluation metrics (WinklerScore, GeneralMetricsEvaluation, IntervalWidth)
 - `pipeline.py` - Data loading and preprocessing
 - `point_estimator.py` - Point estimation layers
-- `utils.py` - Training utilities
 
 
 
