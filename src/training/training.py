@@ -3,6 +3,7 @@ from typing import Callable
 import torch.nn as nn 
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 import argparse
 import sys
@@ -42,6 +43,7 @@ LOSS_REGISTRY = {
     "rmse": RMSELoss,
     "interval_rmse": IntervalRMSELoss,
     "intervalquantile": IntervalQuantileLoss,
+    "pinball": IntervalQuantileLoss,
     "winkler_loss": WinklerLoss,
     "SWRMSE_WS":SWRMSE_WS,
     "SWRMSE_RMSEb": SWRMSE_RMSEb,
@@ -52,10 +54,58 @@ LOSS_REGISTRY = {
 DEFAULT_OPTIMIZER = optim.Adam
 
 
+_LRSchedulerBase = getattr(lr_scheduler, "LRScheduler", lr_scheduler._LRScheduler)
+
+
+class StepDecayScheduler(_LRSchedulerBase):
+    """Step decay (lr * gamma every `step_size` epochs) clamped to a `min_lr` floor."""
+
+    def __init__(self, optimizer, step_size: int = 30, gamma: float = 0.1, min_lr: float = 1e-5, last_epoch: int = -1):
+        self.step_size = max(1, int(step_size))
+        self.gamma = float(gamma)
+        self.min_lr = float(min_lr)
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        decay = self.gamma ** (self.last_epoch // self.step_size)
+        return [max(base * decay, min(self.min_lr, base)) for base in self.base_lrs]
+
+
+SCHEDULER_REGISTRY = {
+    "step": StepDecayScheduler,
+    "steplr": lr_scheduler.StepLR,
+    "multisteplr": lr_scheduler.MultiStepLR,
+    "exponentiallr": lr_scheduler.ExponentialLR,
+    "cosineannealinglr": lr_scheduler.CosineAnnealingLR,
+}
+
+
 def get_optimizer(params, optimizer_config: dict[str, any]) -> Callable:
     optimizer_config = optimizer_config.copy()
     name = optimizer_config.pop("name")
     return OPTIMIZER_REGISTRY.get(name, DEFAULT_OPTIMIZER)(params, **optimizer_config)
+
+
+def get_scheduler(optimizer, scheduler_config: dict[str, any] | None, epochs: int) -> tuple[str, Callable | None]:
+    if not scheduler_config:
+        return "none", None
+
+    scheduler_config = scheduler_config.copy()
+    name = scheduler_config.pop("name")
+
+    if name == "step" and "step_size" not in scheduler_config:
+        scheduler_config["step_size"] = max(1, epochs // 3)
+
+    # Cosine decay ends exactly at eta_min on the last epoch, so the cycle spans
+    # the epochs actually run (T_max = epochs - 1 means epoch epochs-1 -> eta_min).
+    if name == "cosineannealinglr" and "T_max" not in scheduler_config:
+        scheduler_config["T_max"] = max(1, epochs - 1)
+
+    scheduler_class = SCHEDULER_REGISTRY.get(name)
+    if scheduler_class is None:
+        raise ValueError(f"Unknown scheduler '{name}'. Available: {sorted(SCHEDULER_REGISTRY)}")
+
+    return name, scheduler_class(optimizer, **scheduler_config)
 
 def get_metric(metric_config: dict[str, any]) -> tuple[str, Callable]:
     metric_config = metric_config.copy()
@@ -104,16 +154,18 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
     training_dataset = training_dataloader.dataset
     
 
-    x_mean,y_mean = training_dataset.mean
-    x_std,y_std = training_dataset.std
+    x_min,y_min = training_dataset.min
+    x_max,y_max = training_dataset.max
 
     optimizer:Callable = get_optimizer(model.parameters(), configs_training["optimizer"])
+    scheduler_name,scheduler = get_scheduler(optimizer, configs_training.get("scheduler"), epochs)
     loss_name,loss_function = get_loss(configs_training["loss"])
     metric_name,metric_function = get_metric(configs_training["metric"])
     width_metric = IntervalWidth()
     general_metrics_metric = GeneralMetricsEvaluation()
 
     loss_res:list[float] = []
+    lr_res:list[float] = []
     metrics_res:list[float] = []
     width_res:list[float] = []
     mae_res:list[float] = []
@@ -175,11 +227,16 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
             oob_mae_res.append(oob_mae)
             oob_rmse_res.append(oob_rmse)
 
-            print(f"{metric_name}: {metric} | width: {width:.4f} | {loss_name}: {epoch_loss:.5f}| | ir: {ir:.4f} | mae: {mae:.4f}| | rmse: {rmse:.4f}")
+            print(f"{metric_name}: {metric} | width: {width:.4f} | {loss_name}: {epoch_loss:.5f}| | ir: {ir:.4f} | mae: {mae:.4f}| | rmse: {rmse:.4f} | lr: {optimizer.param_groups[0]['lr']:.2e}")
             model.train()
+
+        lr_res.append(float(optimizer.param_groups[0]["lr"]))
+        if scheduler is not None:
+            scheduler.step()
 
     results = {
         "loss": loss_res,
+        "lr": lr_res,
         "metrics": metrics_res,
         "width": width_res,
         "mae":mae_res,
@@ -188,11 +245,20 @@ def training(config_path:str,training_dataloader:DataLoader,eval_dataloader:Data
         "oob_mae":oob_mae_res,
         "oob_rmse":oob_rmse_res,
         "config": configs,
+        "scheduler": {
+            "name": scheduler_name,
+            "step_size": getattr(scheduler, "step_size", None),
+            "gamma": getattr(scheduler, "gamma", None),
+            "min_lr": getattr(scheduler, "min_lr", None),
+            "T_max": getattr(scheduler, "T_max", None),
+            "eta_min": getattr(scheduler, "eta_min", None),
+        },
         "normalization": {
-            "x_mean": x_mean,
-            "x_std": x_std,
-            "y_mean": y_mean,
-            "y_std": y_std,
+            "type": "minmax",
+            "x_min": x_min,
+            "x_max": x_max,
+            "y_min": y_min,
+            "y_max": y_max,
         },
     }
     save_results(results, model, run_name)
