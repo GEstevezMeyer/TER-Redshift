@@ -6,7 +6,6 @@ lis_activation = ["leaky_relu", "leaky_relu", "leaky_relu"]
 lis_increments = [2, 1, 1]
 lis_linears_start = [128, 32, 16]
 lis_LinearN = [3, 2, 1]
-lis_point_estim_function = ["mean", "mean", "mean"]
 
 
 [training]
@@ -14,6 +13,11 @@ lis_point_estim_function = ["mean", "mean", "mean"]
 name = "adamw"
 lr = 0.001
 weight_decay = 0.01
+
+[training.scheduler]
+name = "step"
+gamma = 0.1
+min_lr = 0.00001
 
 [training.loss]
 name = "SWRMSE_RMSEb"
