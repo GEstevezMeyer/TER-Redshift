@@ -99,8 +99,6 @@ def get_scheduler(optimizer, scheduler_config: dict[str, any] | None, epochs: in
     if name == "step" and "step_size" not in scheduler_config:
         scheduler_config["step_size"] = max(1, epochs // 3)
 
-    # Cosine decay ends exactly at eta_min on the last epoch, so the cycle spans
-    # the epochs actually run (T_max = epochs - 1 means epoch epochs-1 -> eta_min).
     if name == "cosineannealinglr" and "T_max" not in scheduler_config:
         scheduler_config["T_max"] = max(1, epochs - 1)
 
@@ -231,7 +229,6 @@ def training(
     loss_res:list[float] = []
     lr_res:list[float] = []
 
-    # One history per dataset, all containing the same metric keys.
     eval_history: dict[str, dict[str, list[float]]] = {
         name: {key: [] for key in EVAL_METRIC_KEYS}
         for name in eval_dataloaders
@@ -300,12 +297,9 @@ def training(
             scheduler.step()
 
     results = {
-        # Training loss, one value per epoch.
         "loss": loss_res,
         "lr": lr_res,
-        # Epoch indices at which the datasets were evaluated.
         "eval_epochs": eval_epochs,
-        # Same metrics for every dataset: train / validation / test.
         "datasets": eval_history,
         "dataset_sizes": dataset_sizes,
         "config": configs,
