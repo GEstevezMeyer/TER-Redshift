@@ -2,7 +2,13 @@ import json
 import csv
 from pathlib import Path
 
-from src.utils.plots import plot_loss, plot_metrics, plot_width, plot_combined
+from src.utils.plots import (
+    METRIC_KEYS,
+    get_dataset_names,
+    get_datasets,
+    plot_metric,
+    plot_all_metrics,
+)
 
 
 def load_results(res_dir):
@@ -34,32 +40,42 @@ def main():
     for run_name, data in results.items():
         run_dir = out_root / run_name
         run_dir.mkdir(parents=True, exist_ok=True)
-        plot_loss(run_name, data, run_dir)
-        plot_metrics(run_name, data, run_dir)
-        plot_width(run_name, data, run_dir)
-        plot_combined(run_name, data, run_dir)
+
+        # One plot per metric, with train / validation / test overlaid.
+        for key in METRIC_KEYS:
+            plot_metric(run_name, data, run_dir, key)
+        # Bonus: all metrics in a single figure.
+        plot_all_metrics(run_name, data, run_dir)
 
         loss_name, metric_name = _get_names(data)
-        loss = data.get("loss", [])
-        metrics = data.get("metrics", [])
-        width = data.get("width", [])
-        summary_rows.append({
+        datasets = get_datasets(data)
+
+        row = {
             "run_name": run_name,
             "loss_name": loss_name,
             "metric_name": metric_name,
-            "loss_last": loss[-1] if loss else None,
-            "metric_last": metrics[-1] if metrics else None,
-            "width_last": width[-1] if width else None,
-        })
+        }
+        for dataset_name in get_dataset_names(data):
+            dataset_metrics = datasets.get(dataset_name, {})
+            for key in METRIC_KEYS:
+                values = dataset_metrics.get(key, [])
+                row[f"{key}_last_{dataset_name}"] = values[-1] if values else None
+        summary_rows.append(row)
 
     if summary_rows:
+        # Union of keys so that runs with different datasets/legacy formats fit.
+        fieldnames = []
+        for row in summary_rows:
+            for key in row:
+                if key not in fieldnames:
+                    fieldnames.append(key)
+
         csv_path = out_root / "results_summary.csv"
         with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=summary_rows[0].keys())
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(summary_rows)
 
 
 if __name__ == "__main__":
     main()
-

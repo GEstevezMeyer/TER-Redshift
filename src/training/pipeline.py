@@ -1,12 +1,15 @@
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 
 TRAINING_DATA_DEFAULT_PATH = "data/epoch_40_train_results.npy"
 VALIDATION_DATA_DEFAULT_PATH = "data/epoch_40_val_results.npy"
 
 TARGET_KEY = "z_true"
 LATENT_KEY = "final_latent"
+
+TEST_SIZE_DEFAULT = 0.2
+
 
 class EspaceLatent(Dataset):
     def __init__(self, path):
@@ -53,12 +56,37 @@ class EspaceLatent(Dataset):
     def std(self):
         return self.x_std.tolist(),self.y_std.tolist()
 
-def main_pipeline(batch_size: int) -> tuple[DataLoader, DataLoader]:
+def main_pipeline(batch_size: int, test_size: float = TEST_SIZE_DEFAULT) -> tuple[DataLoader, dict[str, DataLoader]]:
+
     training_dataset = EspaceLatent(TRAINING_DATA_DEFAULT_PATH)
     validation_dataset = EspaceLatent(VALIDATION_DATA_DEFAULT_PATH)
 
-    return DataLoader(training_dataset, batch_size, shuffle=True), DataLoader(validation_dataset, batch_size, shuffle=False)
+    n_total = len(training_dataset)
+    n_test = int(round(n_total * test_size))
+    n_train = n_total - n_test
+    if n_train <= 0 or n_test <= 0:
+        raise ValueError(
+            f"test_size={test_size} gives an empty split for {n_total} samples"
+        )
+
+    generator = torch.Generator().manual_seed(42)
+    train_dataset, test_dataset = random_split(
+        training_dataset, [n_train, n_test], generator=generator
+    )
+
+    train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
+
+    eval_dataloaders = {
+        "train": DataLoader(train_dataset, batch_size, shuffle=False),
+        "validation": DataLoader(validation_dataset, batch_size, shuffle=False),
+        "test": DataLoader(test_dataset, batch_size, shuffle=False),
+    }
+
+    return train_loader, eval_dataloaders
 
 
 if __name__ == "__main__":
-    print(main_pipeline(32))
+    train_loader, eval_dataloaders = main_pipeline(32)
+    print(f"train batches: {len(train_loader)}")
+    for name, loader in eval_dataloaders.items():
+        print(f"{name}: {len(loader.dataset)} samples")
