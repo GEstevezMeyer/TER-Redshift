@@ -21,19 +21,23 @@ class EspaceLatent(Dataset):
         self.x = x[valid]
         self.y = y[valid].astype(np.float32)
 
-        x_mean = torch.tensor(np.mean(self.x), dtype=torch.float32)
-        x_std = torch.tensor(np.std(self.x), dtype=torch.float32)
-        if float(x_std) < 1e-6:
-            x_std = torch.tensor(1.0, dtype=torch.float32)
-        y_mean = torch.tensor(np.mean(self.y), dtype=torch.float32)
-        y_std = torch.tensor(np.std(self.y), dtype=torch.float32)
-        if float(y_std) == 0 or not torch.isfinite(y_std):
-            y_std = torch.tensor(1.0, dtype=torch.float32)
+        x_min = torch.tensor(np.min(self.x), dtype=torch.float32)
+        x_max = torch.tensor(np.max(self.x), dtype=torch.float32)
+        x_range = x_max - x_min
+        if float(x_range) < 1e-6 or not torch.isfinite(x_range):
+            x_range = torch.tensor(1.0, dtype=torch.float32)
+        y_min = torch.tensor(np.min(self.y), dtype=torch.float32)
+        y_max = torch.tensor(np.max(self.y), dtype=torch.float32)
+        y_range = y_max - y_min
+        if float(y_range) < 1e-6 or not torch.isfinite(y_range):
+            y_range = torch.tensor(1.0, dtype=torch.float32)
 
-        self.x_mean = x_mean
-        self.x_std = x_std
-        self.y_mean = y_mean
-        self.y_std = y_std
+        self.x_min = x_min
+        self.x_max = x_max
+        self.x_range = x_range
+        self.y_min = y_min
+        self.y_max = y_max
+        self.y_range = y_range
 
         self.final_latent = self.x
         self.targets = self.y
@@ -44,17 +48,21 @@ class EspaceLatent(Dataset):
     def __getitem__(self, idx):
         x = torch.tensor(self.x[idx].copy(), dtype=torch.float32)
         y = torch.tensor(self.y[idx].copy(), dtype=torch.float32)
-        x = (x - self.x_mean) / self.x_std
-        y = (y - self.y_mean) / self.y_std
+        x = (x - self.x_min) / self.x_range
+        y = (y - self.y_min) / self.y_range
         return x, y
 
     @property
-    def mean(self):
-        return self.x_mean.tolist(), self.y_mean.tolist()
+    def min(self):
+        return self.x_min.tolist(), self.y_min.tolist()
 
     @property
-    def std(self):
-        return self.x_std.tolist(),self.y_std.tolist()
+    def max(self):
+        return self.x_max.tolist(), self.y_max.tolist()
+
+    @property
+    def range(self):
+        return self.x_range.tolist(), self.y_range.tolist()
 
 def main_pipeline(batch_size: int, test_size: float = TEST_SIZE_DEFAULT) -> tuple[DataLoader, dict[str, DataLoader]]:
 

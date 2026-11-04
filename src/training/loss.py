@@ -95,6 +95,11 @@ class IntervalQuantileLoss(nn.Module):
             t_low, t_sup = target
         else:
             t_low = t_sup = target
+            
+        if t_low.dim() < y_low.dim():
+            t_low = t_low.unsqueeze(-1)
+        if t_sup.dim() < y_sup.dim():
+            t_sup = t_sup.unsqueeze(-1)
 
         loss_low = self._pinball(t_low - y_low, self.q_low).mean()
         loss_sup = self._pinball(t_sup - y_sup, self.q_high).mean()
