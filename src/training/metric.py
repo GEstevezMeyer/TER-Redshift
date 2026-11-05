@@ -105,8 +105,8 @@ class SigmaMAD(nn.Module):
 
         center = (upper + lower)/2
         err = (center - reel)/(1 + reel)
-        med_err = torch.median(err)
-        med_abs = torch.median(abs(med_err - err))
+        med_err = torch.quantile(err, 0.5)
+        med_abs = torch.quantile(torch.abs(err - med_err), 0.5)
         mad = 1.4826 * med_abs
         
         return mad.item()
