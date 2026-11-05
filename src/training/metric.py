@@ -115,4 +115,24 @@ class SigmaMAD(nn.Module):
         return mad.item()
 
 
+class Biais(nn.Module):
+    def __init__(self):
+        super().__init__()
 
+    def forward(self, pred: list[list[float]], reel: list[float]) -> float:
+        pred, reel = torch.as_tensor(pred, dtype=torch.float), torch.as_tensor(reel, dtype=torch.float)
+        pred, reel = pred.cpu(), reel.cpu()
+
+        reel = reel.reshape(-1)
+        if pred.dim() > 2:
+            pred = pred.reshape(pred.shape[0], -1)
+        if pred.dim() == 1:
+            pred = pred.reshape(-1, 2)
+
+        lower = pred[:, 0]
+        upper = pred[:, 1]
+
+        center = (upper + lower)/2
+        err = (center - reel)/(1 + reel)
+
+        return err.mean().item()
