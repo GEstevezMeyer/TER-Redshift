@@ -9,4 +9,5 @@ Ressources/
 .agents/
 res/
 res_plots/
+umap_res/
 .pytest_cache 
