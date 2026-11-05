@@ -1,5 +1,9 @@
 import matplotlib.pyplot as plt
+import numpy as np 
 from pathlib import Path
+import torch 
+
+import umap
 
 
 DATASET_ORDER = ["train", "validation", "test"]
@@ -12,6 +16,14 @@ DATASET_STYLES = {
 METRIC_KEYS = ["loss", "metrics", "width", "mae", "rmse", "ir", "oob_mae", "oob_rmse"]
 
 _FALLBACK_COLORS = ["tab:red", "tab:purple", "tab:brown", "tab:pink", "tab:gray"]
+
+
+
+TRAINING_DATA_DEFAULT_PATH = "data/epoch_40_train_results.npy"
+VALIDATION_DATA_DEFAULT_PATH = "data/epoch_40_val_results.npy"
+
+TARGET_KEY = "z_true"
+LATENT_KEY = "final_latent"
 
 
 def _get_names(data):
@@ -174,3 +186,16 @@ def plot_width(run_name, data, out_dir):
 
 def plot_combined(run_name, data, out_dir):
     return plot_all_metrics(run_name, data, out_dir)
+
+
+def plot_umap_prediction(x_umap:list[list[float]],x_normal:list[list[float]],y:list[float],model) -> None: 
+    
+    
+    model.eval()
+    with torch.no_grad():
+        y_pred = model(x_normal)
+
+    plt.figure(figsize=(12,12))
+
+    plt.plot(x_umap[:,0],x_umap[:,1])
+    
