@@ -11,6 +11,7 @@ lis_increments = [4, 2, 2, 1]
 lis_linears_start = [256, 64, 32, 16]
 lis_LinearN = [3, 2, 1, 1]
 
+p_dropout = 0.2
 
 [training]
 [training.optimizer]
