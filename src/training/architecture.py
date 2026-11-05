@@ -184,7 +184,7 @@ class MacSumDenseMinMax(nn.Module):
 
 
     def __init__(self, MacSumIn: int, MacSumOut: int, output_size: int, linearStart: int,
-                 linearN: int, increment: int, extension_type: str = "point", 
+                 linearN: int, increment: int,p_dropout:int, extension_type: str = "point", 
                  activation_function: str = "relu"):
         super().__init__()
         self.MacSumIn = MacSumIn
@@ -194,6 +194,7 @@ class MacSumDenseMinMax(nn.Module):
         self.increment = increment
         self.output_size = output_size
         self.extension_type = extension_type
+        self.p_dropout = p_dropout
 
         last_size = MacSumOut - increment * linearN * (linearN + 1) // 2
 
@@ -203,6 +204,7 @@ class MacSumDenseMinMax(nn.Module):
         assert linearStart <= MacSumOut, "linearStart can't be bigger than MacSumOut"
         assert output_size >= 1, "output_size must be positive"
         assert output_size <= last_size, "output size can't be bigger than the last linear layer input size"
+        assert 0 <= p_dropout < 1, "dropout needs to be in range [0;1[ " 
 
         if extension_type == "point":
             self.MacSum = NeuroneMacSum(self.MacSumIn, self.MacSumOut)
@@ -215,6 +217,7 @@ class MacSumDenseMinMax(nn.Module):
 
         self.MinMax = MinMax()
         self.activation_function = ACTIVATION_FUNCTION_REGISTERY[activation_function]
+        self.dropout = nn.Dropout(p_dropout)
 
         listLinear = []
         current_input = self.MacSumOut
@@ -236,6 +239,7 @@ class MacSumDenseMinMax(nn.Module):
     def forward(self, x_low: torch.Tensor, x_sup: torch.Tensor = None):
         if self.extension_type == "point":
             x_low_mac, x_sup_mac = self.MacSum(x_low)
+            x_low_mac, x_sup_mac = self.dropout(x_low_mac), self.dropout(x_sup_mac)
             low_pass, sup_pass = self.MinMax(self.ForwardPass(x_low_mac), self.ForwardPass(x_sup_mac))
             return low_pass , sup_pass
         else:
@@ -247,7 +251,7 @@ class MacSumDenseMinMax(nn.Module):
 
 class ArchitectureMacSum(nn.Module):
     def __init__(self, input_shape, lis_MacSumOut, lis_output_size, lis_activation,
-                 lis_increments, lis_linears_start, lis_LinearN):
+                 lis_increments, lis_linears_start, lis_LinearN,p_dropout:int):
         super().__init__()
 
         assert all(i in ACTIVATION_FUNCTION_REGISTERY for i in lis_activation), "one of the activation function is not in the registery"
@@ -257,6 +261,7 @@ class ArchitectureMacSum(nn.Module):
         self.input_shape = input_shape
         current_input_shape = input_shape
         self.blocks = nn.ModuleList()
+        
 
         for i, (macsumout, output_size, activation, increments,
                 linears_start, linearN) in enumerate(zip(
@@ -277,7 +282,7 @@ class ArchitectureMacSum(nn.Module):
                     output_size=output_size,
                     linearStart=linears_start,
                     linearN=linearN,
-                    increment=increments,
+                    increment=increments,p_dropout=p_dropout,
                     extension_type=extension_type,
                     activation_function=activation
                 )
