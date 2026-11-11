@@ -9,8 +9,8 @@ import argparse
 import sys
 import json
 import numpy as np
-from src.training.loss import RMSELoss, IntervalRMSELoss, IntervalQuantileLoss, WinklerLoss,SWRMSE_WS,SWRMSE_RMSEb, WorstBound_RMSE
-from src.training.metric import WinklerScore, GeneralMetricsEvaluation, IntervalWidth
+from src.training.loss import RMSELoss, IntervalRMSELoss, IntervalQuantileLoss, WinklerLoss,SWRMSE_WS,SWRMSE_RMSEb, RMSEb, WorstBound_RMSE
+from src.training.metric import WinklerScore, GeneralMetricsEvaluation, IntervalWidth, SigmaMAD
 
 from tqdm import tqdm
 from src.utils.configs import import_config, return_device
@@ -35,6 +35,8 @@ OPTIMIZER_REGISTRY = {
 
 METRICS_REGISTRY = {
     "winkler": WinklerScore,
+    "sigma_mad": SigmaMAD,
+    "sigmamad": SigmaMAD,
 }
 
 
@@ -47,6 +49,8 @@ LOSS_REGISTRY = {
     "winkler_loss": WinklerLoss,
     "SWRMSE_WS":SWRMSE_WS,
     "SWRMSE_RMSEb": SWRMSE_RMSEb,
+    "rmseb": RMSEb,
+    "rsmeb": RMSEb,
     "WorstBound_RMSE": WorstBound_RMSE
 }
 
