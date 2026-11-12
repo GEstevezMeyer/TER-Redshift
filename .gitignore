@@ -20,4 +20,5 @@ Digraph.gv
 Digraph.gv.pdf
 res/
 res_plots/
+umap_res/
 .pytest_cache 

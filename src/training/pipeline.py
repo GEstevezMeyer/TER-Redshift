@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 
 TRAINING_DATA_DEFAULT_PATH = "data/epoch_40_train_results.npy"
 VALIDATION_DATA_DEFAULT_PATH = "data/epoch_40_val_results.npy"
@@ -8,30 +8,39 @@ VALIDATION_DATA_DEFAULT_PATH = "data/epoch_40_val_results.npy"
 TARGET_KEY = "z_true"
 LATENT_KEY = "final_latent"
 
+TEST_SIZE_DEFAULT = 0.2
+
+
 class EspaceLatent(Dataset):
     def __init__(self, path):
         super().__init__()
+
         data: dict = np.load(path, allow_pickle=True).item()
+
         x = np.asarray(data[LATENT_KEY])
         y = np.asarray(data[TARGET_KEY])
+
         valid = np.isfinite(y) & (y > 0)
+
         self.x = x[valid]
         self.y = y[valid].astype(np.float32)
 
-        x_min = torch.tensor(np.min(self.x), dtype=torch.float32)
-        x_max = torch.tensor(np.max(self.x), dtype=torch.float32)
-        x_range = x_max - x_min
-        if float(x_range) < 1e-6 or not torch.isfinite(x_range):
-            x_range = torch.tensor(1.0, dtype=torch.float32)
+        x_min = torch.tensor(np.min(self.x, axis=0), dtype=torch.float32)
+        x_max = torch.tensor(np.max(self.x, axis=0), dtype=torch.float32)
+
         y_min = torch.tensor(np.min(self.y), dtype=torch.float32)
         y_max = torch.tensor(np.max(self.y), dtype=torch.float32)
+
+        x_range = x_max - x_min
         y_range = y_max - y_min
-        if float(y_range) < 1e-6 or not torch.isfinite(y_range):
-            y_range = torch.tensor(1.0, dtype=torch.float32)
+
+        x_range = torch.where(x_range < 1e-6, 1.0, x_range)
+        y_range = torch.where(y_range < 1e-6, 1.0, y_range)
 
         self.x_min = x_min
         self.x_max = x_max
         self.x_range = x_range
+
         self.y_min = y_min
         self.y_max = y_max
         self.y_range = y_range
@@ -45,8 +54,10 @@ class EspaceLatent(Dataset):
     def __getitem__(self, idx):
         x = torch.tensor(self.x[idx].copy(), dtype=torch.float32)
         y = torch.tensor(self.y[idx].copy(), dtype=torch.float32)
-        x = (x - self.x_min) / self.x_range
-        y = (y - self.y_min) / self.y_range
+
+        x = 2 * (x - self.x_min) / self.x_range - 1
+        y = 2 * (y - self.y_min) / self.y_range - 1
+
         return x, y
 
     @property
@@ -61,12 +72,38 @@ class EspaceLatent(Dataset):
     def range(self):
         return self.x_range.tolist(), self.y_range.tolist()
 
-def main_pipeline(batch_size: int) -> tuple[DataLoader, DataLoader]:
+
+def main_pipeline(batch_size: int, test_size: float = TEST_SIZE_DEFAULT) -> tuple[DataLoader, dict[str, DataLoader]]:
+
     training_dataset = EspaceLatent(TRAINING_DATA_DEFAULT_PATH)
     validation_dataset = EspaceLatent(VALIDATION_DATA_DEFAULT_PATH)
 
-    return DataLoader(training_dataset, batch_size, shuffle=True), DataLoader(validation_dataset, batch_size, shuffle=False)
+    n_total = len(training_dataset)
+    n_test = int(round(n_total * test_size))
+    n_train = n_total - n_test
+    if n_train <= 0 or n_test <= 0:
+        raise ValueError(
+            f"test_size={test_size} gives an empty split for {n_total} samples"
+        )
+
+    generator = torch.Generator().manual_seed(42)
+    train_dataset, test_dataset = random_split(
+        training_dataset, [n_train, n_test], generator=generator
+    )
+
+    train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
+
+    eval_dataloaders = {
+        "train": DataLoader(train_dataset, batch_size, shuffle=False),
+        "validation": DataLoader(validation_dataset, batch_size, shuffle=False),
+        "test": DataLoader(test_dataset, batch_size, shuffle=False),
+    }
+
+    return train_loader, eval_dataloaders
 
 
 if __name__ == "__main__":
-    print(main_pipeline(32))
+    train_loader, eval_dataloaders = main_pipeline(32)
+    print(f"train batches: {len(train_loader)}")
+    for name, loader in eval_dataloaders.items():
+        print(f"{name}: {len(loader.dataset)} samples")
