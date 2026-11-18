@@ -15,9 +15,13 @@ from src.training.metric import WinklerScore, GeneralMetricsEvaluation, Interval
 from tqdm import tqdm
 from src.utils.configs import import_config, return_device
 from src.training.pipeline import main_pipeline, TEST_SIZE_DEFAULT
-from src.training.architecture import ArchitectureMacSum
+from src.training.architecture import ArchitectureMacSum,SimpleMacSum
 
 
+MODEL_REGISTRY = {
+    "ArchitectureMacSum": ArchitectureMacSum,
+    "SimpleMacSum": SimpleMacSum
+}
 
 
 OPTIMIZER_REGISTRY = {
@@ -50,7 +54,7 @@ LOSS_REGISTRY = {
     "WorstBound_RMSE": WorstBound_RMSE
 }
 
-# Metrics that are computed identically on every evaluation dataset.
+
 EVAL_METRIC_KEYS = ["loss", "metrics", "width", "mae", "rmse", "ir", "oob_mae", "oob_rmse"]
 
 
@@ -81,6 +85,20 @@ SCHEDULER_REGISTRY = {
     "exponentiallr": lr_scheduler.ExponentialLR,
     "cosineannealinglr": lr_scheduler.CosineAnnealingLR,
 }
+
+
+def get_model(model_config: dict[str, any]) -> torch.nn.Module:
+    model_config = model_config.copy()
+    name = model_config.pop("model_name", None)
+
+    if name is None:
+        raise ValueError(f"'model_name' is required. Available: {sorted(MODEL_REGISTRY)}")
+
+    model_class = MODEL_REGISTRY.get(name)
+    if model_class is None:
+        raise ValueError(f"Unknown model_name '{name}'. Available: {sorted(MODEL_REGISTRY)}")
+
+    return model_class(**model_config)
 
 
 def get_optimizer(params, optimizer_config: dict[str, any]) -> Callable:
@@ -131,9 +149,6 @@ def save_results(results: dict, model: torch.nn.Module, run_name: str = "results
     with open(f"res/{run_name}.json", "w") as f:
         json.dump(results, f, indent=4)
     torch.save(model.state_dict(), f"res/{run_name}.pth")
-
-def build_MacSumIntervallArchitecture_model(configs_model: dict[str, any]) -> ArchitectureMacSum:
-    return ArchitectureMacSum(**configs_model)
 
 
 def _unwrap_dataset(dataset):
@@ -200,7 +215,7 @@ def training(
     eval_frequency: int,
     epochs: int,
     run_name: str = "results",
-) -> ArchitectureMacSum:
+) -> torch.nn.Module:
     configs = import_config(config_path)
     configs_model = configs["model"]
     configs_training = configs["training"]
@@ -208,7 +223,7 @@ def training(
     torch.manual_seed(42)
     np.random.seed(42)
 
-    model = build_MacSumIntervallArchitecture_model(configs_model)
+    model = get_model(configs_model)
     device:str = return_device() or "cpu"
 
     model = model.to(device)

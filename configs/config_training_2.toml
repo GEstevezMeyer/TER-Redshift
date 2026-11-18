@@ -1,6 +1,7 @@
 
 
 [model]
+model_name = "ArchitectureMacSum"
 input_shape = 1024
 
 lis_MacSumOut = [256, 128, 64, 32]

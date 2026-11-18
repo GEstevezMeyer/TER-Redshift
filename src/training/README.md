@@ -11,4 +11,18 @@
 
 
 ## Usage
-Use configs in `configs/` to train models.
+Use configs in `configs/` to train models. The `[model]` section must start with
+`model_name`, which selects the class from `MODEL_REGISTRY` in
+`src/training/training.py`; the remaining keys are passed to its constructor:
+
+```toml
+[model]
+model_name = "ArchitectureMacSum"
+input_shape = 1024
+lis_MacSumOut = [128, 64, 32]
+```
+
+To use another architecture, define it in `architecture.py`, add one entry to
+`MODEL_REGISTRY`, and set `model_name` to that key in the config. The same
+`model_name` is stored in `res/*.json`, so saved models can be reloaded with
+`get_model` (used by `training.py`, `umap_res.py` and `utils/configs.py`).

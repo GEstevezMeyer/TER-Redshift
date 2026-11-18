@@ -36,7 +36,7 @@ import numpy as np
 import torch
 import umap
 
-from src.training.architecture import ArchitectureMacSum
+from src.training.training import get_model
 
 TARGET_KEY = "z_true"
 LATENT_KEY = "final_latent"
@@ -146,12 +146,12 @@ def normalized_latent(split: Split, x_min=None, x_max=None) -> np.ndarray:
     return 2.0 * (split.latent - x_min) / span - 1.0
 
 
-def load_model(config: dict, pth_path: str | Path, device: torch.device) -> ArchitectureMacSum:
+def load_model(config: dict, pth_path: str | Path, device: torch.device) -> torch.nn.Module:
     model_config = config.get("model")
     if not isinstance(model_config, dict):
         raise ValueError("results.json does not contain a 'model' configuration")
 
-    model = ArchitectureMacSum(**model_config)
+    model = get_model(model_config)
     state_dict = torch.load(pth_path, map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
     model.to(device)
