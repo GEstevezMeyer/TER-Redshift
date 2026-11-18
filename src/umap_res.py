@@ -12,11 +12,14 @@ For each ``<run>.json`` / ``<run>.pth`` pair found in ``res/`` the script:
 3. runs the trained model to obtain ``y_low`` and ``y_sup``,
 4. fits a single UMAP embedding on the train + validation samples, so both
    datasets share the same 2-D space,
-5. writes one figure for training and one figure for validation to
-   ``umap_res/<run>/train_umap.png`` and
-   ``umap_res/<run>/validation_umap.png``.
+5. writes, for each split, a three-panel value figure to
+   ``umap_res/<run>/train_umap.png`` / ``validation_umap.png`` and a
+   separate midpoint-error figure to
+   ``umap_res/<run>/train_umap_error.png`` / ``validation_umap_error.png``.
 
-Each figure has three panels: ``y_true``, ``y_low`` and ``y_sup``.
+Each value figure has three panels: ``y_true``, ``y_low`` and ``y_sup``.
+The error figure colors samples by ``y_true - (y_low + y_sup) / 2``, i.e.
+the difference between the target and the center of the predicted interval.
 """
 
 from __future__ import annotations
@@ -63,6 +66,10 @@ PLOT_TITLES = {
     "y_low": "y_low (predicted lower bound)",
     "y_sup": "y_sup (predicted upper bound)",
 }
+
+CENTER_KEY = "center"  # (y_low + y_sup) / 2
+ERROR_KEY = "error"  # y_true - center
+ERROR_CMAP = "RdBu_r"  # diverging, centered on zero
 
 
 @dataclass
@@ -238,15 +245,68 @@ def plot_umap_dataset(
     return out_path
 
 
+def plot_umap_error(
+    run_name: str,
+    dataset_name: str,
+    embedding: np.ndarray,
+    error: np.ndarray,
+    out_path: str | Path,
+) -> Path:
+    """Save a UMAP figure colored by ``y_true - (y_low + y_sup) / 2``.
+
+    The color scale is symmetric around zero so negative errors (true value
+    below the predicted center) and positive errors are directly comparable.
+    """
+    error = np.asarray(error, dtype=np.float64)
+    finite = np.isfinite(error)
+    abs_max = float(np.max(np.abs(error[finite]))) if np.any(finite) else 0.0
+    if abs_max <= 0.0:
+        abs_max = 1.0
+
+    fig, ax = plt.subplots(figsize=(8, 6.5))
+    scatter = ax.scatter(
+        embedding[:, 0],
+        embedding[:, 1],
+        c=error,
+        cmap=plt.get_cmap(ERROR_CMAP),
+        vmin=-abs_max,
+        vmax=abs_max,
+        s=8,
+        alpha=0.75,
+        linewidths=0,
+        rasterized=True,
+    )
+    ax.set_title(f"{run_name} - {dataset_name} - midpoint prediction error")
+    ax.set_xlabel("UMAP 1")
+    ax.set_ylabel("UMAP 2")
+    ax.grid(True, alpha=0.2)
+
+    cbar = fig.colorbar(scatter, ax=ax, shrink=0.85)
+    cbar.set_label("y_true - (y_low + y_sup) / 2")
+
+    fig.tight_layout()
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
 def build_run_values(split: Split, model, device, x_min=None, x_max=None):
     """Predict the interval for one split and return values in physical units."""
     x_normal = normalized_latent(split, x_min=x_min, x_max=x_max)
     y_low_norm, y_sup_norm = predict_interval(model, x_normal, device)
     y_range = split.y_range
+    y_true = split.target.astype(np.float64)
+    y_low = denormalize(y_low_norm, split.y_min, y_range)
+    y_sup = denormalize(y_sup_norm, split.y_min, y_range)
+    center = (y_low + y_sup) / 2.0
     return {
-        "y_true": split.target.astype(np.float64),
-        "y_low": denormalize(y_low_norm, split.y_min, y_range),
-        "y_sup": denormalize(y_sup_norm, split.y_min, y_range),
+        "y_true": y_true,
+        "y_low": y_low,
+        "y_sup": y_sup,
+        CENTER_KEY: center,
+        ERROR_KEY: y_true - center,
     }
 
 
@@ -314,10 +374,22 @@ def main():
 
         train_path = run_dir / f"{TRAIN_DATASET}_umap.png"
         validation_path = run_dir / f"{VALIDATION_DATASET}_umap.png"
+        train_error_path = run_dir / f"{TRAIN_DATASET}_umap_error.png"
+        validation_error_path = run_dir / f"{VALIDATION_DATASET}_umap_error.png"
 
         print(f"[{run_name}] writing {train_path}")
         generated.append(
             plot_umap_dataset(run_name, TRAIN_DATASET, train_embedding, train_values, train_path)
+        )
+        print(f"[{run_name}] writing {train_error_path}")
+        generated.append(
+            plot_umap_error(
+                run_name,
+                TRAIN_DATASET,
+                train_embedding,
+                train_values[ERROR_KEY],
+                train_error_path,
+            )
         )
         print(f"[{run_name}] writing {validation_path}")
         generated.append(
@@ -327,6 +399,16 @@ def main():
                 validation_embedding,
                 validation_values,
                 validation_path,
+            )
+        )
+        print(f"[{run_name}] writing {validation_error_path}")
+        generated.append(
+            plot_umap_error(
+                run_name,
+                VALIDATION_DATASET,
+                validation_embedding,
+                validation_values[ERROR_KEY],
+                validation_error_path,
             )
         )
 

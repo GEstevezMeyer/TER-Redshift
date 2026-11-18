@@ -10,6 +10,8 @@ from src.utils.plots import (
     plot_all_metrics,
 )
 
+VALIDATION_DATASET = "validation"
+
 
 def load_results(res_dir):
     results = {}
@@ -41,11 +43,35 @@ def main():
         run_dir = out_root / run_name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        # One plot per metric, with train / validation / test overlaid.
+        # Validation gets its own figures instead of being overlaid with the
+        # other datasets. When it is the only dataset there is nothing to split.
+        names = get_dataset_names(data)
+        split_validation = VALIDATION_DATASET in names and len(names) > 1
+        exclude_validation = {VALIDATION_DATASET} if split_validation else set()
+
+        # One plot per metric, with the remaining datasets overlaid.
         for key in METRIC_KEYS:
-            plot_metric(run_name, data, run_dir, key)
-        # Bonus: all metrics in a single figure.
-        plot_all_metrics(run_name, data, run_dir)
+            plot_metric(run_name, data, run_dir, key, exclude=exclude_validation)
+            if split_validation:
+                plot_metric(
+                    run_name,
+                    data,
+                    run_dir,
+                    key,
+                    include={VALIDATION_DATASET},
+                    filename_suffix=f"_{VALIDATION_DATASET}",
+                )
+
+        # Bonus: all metrics in a single figure, with the same split.
+        plot_all_metrics(run_name, data, run_dir, exclude=exclude_validation)
+        if split_validation:
+            plot_all_metrics(
+                run_name,
+                data,
+                run_dir,
+                include={VALIDATION_DATASET},
+                filename_suffix=f"_{VALIDATION_DATASET}",
+            )
 
         loss_name, metric_name = _get_names(data)
         datasets = get_datasets(data)

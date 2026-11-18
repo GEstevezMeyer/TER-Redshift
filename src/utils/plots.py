@@ -73,6 +73,16 @@ def get_dataset_names(data):
     return names
 
 
+def _filter_dataset_names(data, include=None, exclude=None):
+    """Select datasets to plot, optionally restricting to / skipping names."""
+    names = get_dataset_names(data)
+    if include is not None:
+        names = [name for name in names if name in include]
+    if exclude is not None:
+        names = [name for name in names if name not in exclude]
+    return names
+
+
 def _dataset_style(name, index):
     if name in DATASET_STYLES:
         return DATASET_STYLES[name]
@@ -93,10 +103,14 @@ def _slug(text):
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in str(text))
 
 
-def plot_metric(run_name, data, out_dir, key):
-    """Plot one metric with the train / validation / test curves overlaid."""
+def plot_metric(run_name, data, out_dir, key, include=None, exclude=None, filename_suffix=""):
+    """Plot one metric with the selected datasets overlaid.
+
+    ``include`` / ``exclude`` filter dataset names; ``filename_suffix`` is
+    inserted before the run name so several variants can coexist.
+    """
     datasets = get_datasets(data)
-    names = get_dataset_names(data)
+    names = _filter_dataset_names(data, include=include, exclude=exclude)
     label = _get_metric_label(data, key)
 
     plt.figure()
@@ -123,16 +137,16 @@ def plot_metric(run_name, data, out_dir, key):
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    path = Path(out_dir) / f"{key}_{_slug(label)}_{run_name}.png"
+    path = Path(out_dir) / f"{key}_{_slug(label)}{filename_suffix}_{run_name}.png"
     plt.savefig(path)
     plt.close()
     return path
 
 
-def plot_all_metrics(run_name, data, out_dir):
-    """Plot every metric in a single grid, datasets overlaid in each subplot."""
+def plot_all_metrics(run_name, data, out_dir, include=None, exclude=None, filename_suffix=""):
+    """Plot every metric in a grid, selected datasets overlaid in each subplot."""
     datasets = get_datasets(data)
-    names = get_dataset_names(data)
+    names = _filter_dataset_names(data, include=include, exclude=exclude)
 
     keys = [key for key in METRIC_KEYS if any(datasets.get(n, {}).get(key) for n in names)]
     if not keys:
@@ -165,7 +179,7 @@ def plot_all_metrics(run_name, data, out_dir):
 
     fig.suptitle(run_name)
     plt.tight_layout()
-    path = Path(out_dir) / f"all_metrics_{run_name}.png"
+    path = Path(out_dir) / f"all_metrics{filename_suffix}_{run_name}.png"
     plt.savefig(path)
     plt.close()
     return path
