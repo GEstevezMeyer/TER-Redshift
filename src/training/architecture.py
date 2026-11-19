@@ -300,5 +300,16 @@ class ArchitectureMacSum(nn.Module):
         return x_low, x_sup
 
 
+
+class SimpleMacSum(nn.Module): 
+    def __init__(self,input_size): 
+        super().__init__()
+        self.Macsum = NeuroneMacSum(input_size,1)
+
+    def forward(self,x):
+        return self.Macsum(x)
+
+
+
 if __name__ == "__main__":
     pass

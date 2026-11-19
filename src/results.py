@@ -18,7 +18,7 @@ def load_results(res_dir):
     res_path = Path(res_dir)
     for file in res_path.glob("*.json"):
         run_name = file.stem
-        with open(file, "r") as f:
+        with open(file, "r", encoding="utf-8") as f:
             results[run_name] = json.load(f)
     return results
 
@@ -43,13 +43,13 @@ def main():
         run_dir = out_root / run_name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        # Validation gets its own figures instead of being overlaid with the
-        # other datasets. When it is the only dataset there is nothing to split.
+                                                                            
+                                                                                
         names = get_dataset_names(data)
         split_validation = VALIDATION_DATASET in names and len(names) > 1
         exclude_validation = {VALIDATION_DATASET} if split_validation else set()
 
-        # One plot per metric, with the remaining datasets overlaid.
+                                                                    
         for key in METRIC_KEYS:
             plot_metric(run_name, data, run_dir, key, exclude=exclude_validation)
             if split_validation:
@@ -62,7 +62,7 @@ def main():
                     filename_suffix=f"_{VALIDATION_DATASET}",
                 )
 
-        # Bonus: all metrics in a single figure, with the same split.
+                                                                     
         plot_all_metrics(run_name, data, run_dir, exclude=exclude_validation)
         if split_validation:
             plot_all_metrics(
@@ -89,7 +89,7 @@ def main():
         summary_rows.append(row)
 
     if summary_rows:
-        # Union of keys so that runs with different datasets/legacy formats fit.
+                                                                                
         fieldnames = []
         for row in summary_rows:
             for key in row:
@@ -97,7 +97,7 @@ def main():
                     fieldnames.append(key)
 
         csv_path = out_root / "results_summary.csv"
-        with open(csv_path, "w", newline="") as f:
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(summary_rows)

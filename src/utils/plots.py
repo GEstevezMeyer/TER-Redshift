@@ -12,7 +12,7 @@ DATASET_STYLES = {
     "validation": {"color": "tab:orange", "linestyle": "--"},
     "test": {"color": "tab:green", "linestyle": ":"},
 }
-# Metrics stored for every dataset by the training script.
+                                                          
 METRIC_KEYS = ["loss", "metrics", "width", "mae", "rmse", "ir", "oob_mae", "oob_rmse"]
 
 _FALLBACK_COLORS = ["tab:red", "tab:purple", "tab:brown", "tab:pink", "tab:gray"]
@@ -185,7 +185,7 @@ def plot_all_metrics(run_name, data, out_dir, include=None, exclude=None, filena
     return path
 
 
-# Backwards-compatible helpers.
+                               
 def plot_loss(run_name, data, out_dir):
     return plot_metric(run_name, data, out_dir, "loss")
 
