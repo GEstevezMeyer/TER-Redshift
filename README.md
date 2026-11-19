@@ -104,6 +104,19 @@ Sorties dans `umap_res/<run>/` :
 
 Les prédictions passent par le `Dataset` `EspaceLatent` de `training.pipeline` : chaque split est normalisé avec ses propres statistiques, comme pendant l'évaluation en training (y compris pour la validation).
 
+## Histogrammes des prédictions
+
+Générer les distributions de `y_true`, `y_low` et `y_sup` pour chaque run avec le même pipeline d'inférence que `umap_res` :
+
+```bash
+python -m src.z_res
+```
+
+Options (`python -m src.z_res --help`) : `--max-samples` (10000, 0 = tous),
+`--seed` (42), `--batch-size` (512), `--bins` (60).
+
+Sorties dans `z_res/<run>/` : `<dataset>_histogram.png` (trois courbes superposées sur des bins communs).
+
 ## Configuration
 
 Les fichiers TOML définissent notamment :

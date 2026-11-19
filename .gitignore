@@ -3,11 +3,10 @@ myenv/
 
 .env
 
-#Data
 data/
 Ressources/
 
-#Agents
+
 .agents/
 
 
@@ -21,4 +20,5 @@ Digraph.gv.pdf
 res/
 res_plots/
 umap_res/
+z_res/
 .pytest_cache 
