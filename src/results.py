@@ -1,34 +1,16 @@
-import json
 import csv
 from pathlib import Path
 
 from src.utils.plots import (
     METRIC_KEYS,
+    VALIDATION_DATASET,
     get_dataset_names,
     get_datasets,
-    plot_metric,
+    get_names,
+    load_results,
     plot_all_metrics,
+    plot_metric,
 )
-
-VALIDATION_DATASET = "validation"
-
-
-def load_results(res_dir):
-    results = {}
-    res_path = Path(res_dir)
-    for file in res_path.glob("*.json"):
-        run_name = file.stem
-        with open(file, "r", encoding="utf-8") as f:
-            results[run_name] = json.load(f)
-    return results
-
-
-def _get_names(data):
-    config = data.get("config", {}) or {}
-    training = config.get("training", {}) or {}
-    loss_name = (training.get("loss") or {}).get("name", "loss")
-    metric_name = (training.get("metric") or {}).get("name", "metric")
-    return loss_name, metric_name
 
 
 def main():
@@ -73,7 +55,7 @@ def main():
                 filename_suffix=f"_{VALIDATION_DATASET}",
             )
 
-        loss_name, metric_name = _get_names(data)
+        loss_name, metric_name = get_names(data)
         datasets = get_datasets(data)
 
         row = {

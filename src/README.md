@@ -9,6 +9,7 @@ src/
 ├── __init__.py
 ├── results.py          # Génération de figures de métriques et résumé CSV depuis res/
 ├── umap_res.py         # Génération de figures UMAP par run (données + modèle)
+├── z_res.py            # Histogrammes y_true / y_low / y_sup par run
 ├── training/           # Cœur entraînement: architectures, losses, métriques, pipeline, boucle
 └── utils/              # Utilitaires partagés (config, plots, FITS)
 ```
@@ -56,6 +57,18 @@ python -m src.umap_res
 Options CLI (`--help`) : `--max-samples` (10000, 0 = tous), `--seed` (42),
 `--n-neighbors` (15), `--min-dist` (0.1), `--batch-size` (512).
 
+### `z_res.py`
+
+Histogrammes superposés de `y_true`, `y_low` et `y_sup` pour le train et la validation.
+
+- Réutilise `load_split`, `load_model` et `build_run_values` de `umap_res.py`
+- Sortie : `z_res/<run>/<dataset>_histogram.png`
+- Options CLI : `--max-samples` (10000, 0 = tous), `--seed` (42), `--batch-size` (512), `--bins` (60)
+
+```bash
+python -m src.z_res
+```
+
 ## Sous-packages
 
 ### `training/`
@@ -74,7 +87,7 @@ Voir `src/training/README.md` pour le détail.
 Utilitaires transverses :
 
 - `configs.py` : lecture de configuration TOML, récupération de device (`DEVICE`), chargement de modèle depuis `.pth`
-- `plots.py` : fonctions de tracé utilisées par `src.results` (métriques par dataset, vues combinées, compatibilité formats)
+- `plots.py` : helpers partagés par `src.results`, `src.umap_res` et `src.z_res` (chargement des runs/`EspaceLatent`, inférence `build_run_values`, sauvegarde de figures, tracés de métriques et histogrammes)
 - `fits_management.py` : helpers pour extraire des données d'images depuis des fichiers FITS (`astropy`)
 
 ## Conventions générales

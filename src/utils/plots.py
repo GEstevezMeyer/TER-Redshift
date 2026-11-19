@@ -1,9 +1,16 @@
-import matplotlib.pyplot as plt
-import numpy as np 
+import json
+from dataclasses import dataclass
 from pathlib import Path
-import torch 
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from torch.utils.data import DataLoader, Subset
 
 import umap
+
+from src.training.pipeline import EspaceLatent
+from src.training.training import get_model
 
 
 DATASET_ORDER = ["train", "validation", "test"]
@@ -25,8 +32,34 @@ VALIDATION_DATA_DEFAULT_PATH = "data/epoch_40_val_results.npy"
 TARGET_KEY = "z_true"
 LATENT_KEY = "final_latent"
 
+RES_DIR = Path("res")
+TRAIN_DATASET = "train"
+VALIDATION_DATASET = "validation"
+TRAIN_DATA_PATH = Path(TRAINING_DATA_DEFAULT_PATH)
+VALIDATION_DATA_PATH = Path(VALIDATION_DATA_DEFAULT_PATH)
 
-def _get_names(data):
+MAX_SAMPLES = 10_000
+SEED = 42
+BATCH_SIZE = 512
+N_BINS = 60
+
+PLOT_KEYS = ["y_true", "y_low", "y_sup"]
+PLOT_TITLES = {
+    "y_true": "y_true (redshift)",
+    "y_low": "y_low (predicted lower bound)",
+    "y_sup": "y_sup (predicted upper bound)",
+}
+HIST_COLORS = {
+    "y_true": "tab:blue",
+    "y_low": "tab:orange",
+    "y_sup": "tab:green",
+}
+
+CENTER_KEY = "center"
+ERROR_KEY = "error"
+
+
+def get_names(data):
     config = data.get("config", {}) or {}
     training = config.get("training", {}) or {}
     loss_name = (training.get("loss") or {}).get("name", "loss")
@@ -35,7 +68,7 @@ def _get_names(data):
 
 
 def _get_metric_label(data, key):
-    loss_name, metric_name = _get_names(data)
+    loss_name, metric_name = get_names(data)
     return {
         "loss": loss_name,
         "metrics": metric_name,
@@ -138,9 +171,7 @@ def plot_metric(run_name, data, out_dir, key, include=None, exclude=None, filena
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     path = Path(out_dir) / f"{key}_{_slug(label)}{filename_suffix}_{run_name}.png"
-    plt.savefig(path)
-    plt.close()
-    return path
+    return save_figure(plt.gcf(), path)
 
 
 def plot_all_metrics(run_name, data, out_dir, include=None, exclude=None, filename_suffix=""):
@@ -180,9 +211,7 @@ def plot_all_metrics(run_name, data, out_dir, include=None, exclude=None, filena
     fig.suptitle(run_name)
     plt.tight_layout()
     path = Path(out_dir) / f"all_metrics{filename_suffix}_{run_name}.png"
-    plt.savefig(path)
-    plt.close()
-    return path
+    return save_figure(fig, path)
 
 
                                
@@ -212,4 +241,200 @@ def plot_umap_prediction(x_umap:list[list[float]],x_normal:list[list[float]],y:l
     plt.figure(figsize=(12,12))
 
     plt.plot(x_umap[:,0],x_umap[:,1])
-    
+
+
+def safe_range(low, high):
+    """Return ``high - low`` with zero spans replaced by one."""
+    if np.isscalar(low):
+        return high - low if high - low >= 1e-6 else 1.0
+    span = high - low
+    return np.where(span < 1e-6, 1.0, span)
+
+
+def subsample_indices(n_samples: int, max_samples: int, rng: np.random.Generator):
+    if max_samples <= 0 or n_samples <= max_samples:
+        return np.arange(n_samples)
+    indices = rng.choice(n_samples, max_samples, replace=False)
+    indices.sort()
+    return indices
+
+
+@dataclass
+class Split:
+    """A (possibly subsampled) dataset plus its source :class:`EspaceLatent`."""
+
+    name: str
+    latent: np.ndarray
+    target: np.ndarray
+    x_min: np.ndarray
+    x_max: np.ndarray
+    y_min: float
+    y_max: float
+    dataset: EspaceLatent
+    indices: np.ndarray
+
+    @property
+    def x_range(self) -> np.ndarray:
+        return safe_range(self.x_min, self.x_max)
+
+    @property
+    def y_range(self) -> float:
+        return safe_range(self.y_min, self.y_max)
+
+
+def load_split(
+    path: str | Path,
+    name: str,
+    max_samples: int = MAX_SAMPLES,
+    seed: int = SEED,
+) -> Split:
+    """Load one ``*_results.npy`` file with :class:`EspaceLatent`."""
+    dataset = EspaceLatent(path)
+
+    latent = np.asarray(dataset.final_latent, dtype=np.float32)
+    target = np.asarray(dataset.targets, dtype=np.float32)
+
+    valid = np.flatnonzero(np.isfinite(target) & (target > 0))
+    if latent.ndim == 2:
+        valid = valid[np.isfinite(latent[valid]).all(axis=1)]
+
+    if len(valid) == 0:
+        raise ValueError(f"No valid samples found in {path}")
+
+    x_min = latent[valid].min(axis=0)
+    x_max = latent[valid].max(axis=0)
+    y_min = float(target[valid].min())
+    y_max = float(target[valid].max())
+
+    rng = np.random.default_rng(seed)
+    picked = subsample_indices(len(valid), max_samples, rng)
+    indices = valid[picked]
+
+    return Split(
+        name=name,
+        latent=latent[indices],
+        target=target[indices],
+        x_min=x_min,
+        x_max=x_max,
+        y_min=y_min,
+        y_max=y_max,
+        dataset=dataset,
+        indices=indices,
+    )
+
+
+def load_model(config: dict, pth_path: str | Path, device: torch.device) -> torch.nn.Module:
+    model_config = config.get("model")
+    if not isinstance(model_config, dict):
+        raise ValueError("results.json does not contain a 'model' configuration")
+
+    model = get_model(model_config)
+    state_dict = torch.load(pth_path, map_location=device, weights_only=True)
+    model.load_state_dict(state_dict)
+    model.to(device)
+    model.eval()
+    return model
+
+
+def predict_interval(
+    model: torch.nn.Module,
+    dataset,
+    device: torch.device,
+    batch_size: int = BATCH_SIZE,
+):
+    """Run the model on an :class:`EspaceLatent` (sub)dataset."""
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    lows = []
+    sups = []
+    with torch.no_grad():
+        for x, _ in loader:
+            low, sup = model(x.to(device))
+            lows.append(low.detach().cpu().numpy().reshape(-1))
+            sups.append(sup.detach().cpu().numpy().reshape(-1))
+    if not lows:
+        return np.array([]), np.array([])
+    return np.concatenate(lows), np.concatenate(sups)
+
+
+def denormalize(values: np.ndarray, y_min: float, y_range: float) -> np.ndarray:
+    """Inverse of the ``[-1, 1]`` target normalization used in training."""
+    return (values + 1.0) / 2.0 * y_range + y_min
+
+
+def build_run_values(split: Split, model, device, batch_size: int = BATCH_SIZE):
+    """Predict the interval for one split and return values in physical units."""
+    subset = Subset(split.dataset, split.indices)
+    y_low_norm, y_sup_norm = predict_interval(model, subset, device, batch_size=batch_size)
+
+    y_min = float(split.dataset.y_min)
+    y_range = safe_range(y_min, float(split.dataset.y_max))
+
+    y_true = split.target.astype(np.float64)
+    y_low = denormalize(y_low_norm, y_min, y_range)
+    y_sup = denormalize(y_sup_norm, y_min, y_range)
+    center = (y_low + y_sup) / 2.0
+    return {
+        "y_true": y_true,
+        "y_low": y_low,
+        "y_sup": y_sup,
+        CENTER_KEY: center,
+        ERROR_KEY: y_true - center,
+    }
+
+
+def load_results(res_dir: str | Path) -> dict:
+    """Load every ``<run>.json`` file in ``res_dir`` keyed by run name."""
+    results = {}
+    res_path = Path(res_dir)
+    for file in res_path.glob("*.json"):
+        with open(file, "r", encoding="utf-8") as handle:
+            results[file.stem] = json.load(handle)
+    return results
+
+
+def save_figure(fig, path: str | Path, dpi: int = 200) -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def plot_histogram(
+    run_name: str,
+    dataset_name: str,
+    values: dict[str, np.ndarray],
+    out_path: str | Path,
+    bins: int = N_BINS,
+) -> Path:
+    """Save one figure overlaying y_true / y_low / y_sup on shared bins."""
+    samples = [np.asarray(values[key], dtype=np.float64) for key in PLOT_KEYS]
+    samples = [sample[np.isfinite(sample)] for sample in samples]
+    if any(sample.size == 0 for sample in samples):
+        raise ValueError(f"No finite values to histogram for {run_name} / {dataset_name}")
+
+    all_values = np.concatenate(samples)
+    vmin, vmax = float(all_values.min()), float(all_values.max())
+    if vmin == vmax:
+        vmax = vmin + 1.0
+    edges = np.linspace(vmin, vmax, bins + 1)
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    for key, sample in zip(PLOT_KEYS, samples):
+        ax.hist(
+            sample,
+            bins=edges,
+            histtype="step",
+            linewidth=2,
+            color=HIST_COLORS[key],
+            label=PLOT_TITLES[key],
+        )
+
+    ax.set_title(f"{run_name} - {dataset_name} - prediction histograms")
+    ax.set_xlabel("value")
+    ax.set_ylabel("count")
+    ax.legend()
+    ax.grid(True, alpha=0.2)
+    fig.tight_layout()
+    return save_figure(fig, out_path)
+
