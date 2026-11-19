@@ -4,14 +4,18 @@ Launch it with::
 
     python -m src.umap_res
 
+All tuning knobs are CLI options with the values below as defaults; see
+``python -m src.umap_res --help``.
+
 For each ``<run>.json`` / ``<run>.pth`` pair found in ``res/`` the script:
 
 1. loads the latent features and targets from the training / validation
-   ``*_results.npy`` files,
-2. normalizes the latent features exactly like :class:`EspaceLatent`,
+   ``*_results.npy`` files through :class:`src.training.pipeline.EspaceLatent`,
+2. feeds that dataset to the model (same normalization as during training
+   evaluation, including for the validation split),
 3. runs the trained model to obtain ``y_low`` and ``y_sup``,
-4. fits a single UMAP embedding on the train + validation samples, so both
-   datasets share the same 2-D space,
+4. fits a UMAP embedding on the training samples and projects the validation
+   samples into that 2-D space,
 5. writes, for each split, a three-panel value figure to
    ``umap_res/<run>/train_umap.png`` / ``validation_umap.png`` and a
    separate midpoint-error figure to
@@ -24,6 +28,7 @@ the difference between the target and the center of the predicted interval.
 
 from __future__ import annotations
 
+import argparse
 import gc
 import json
 import warnings
@@ -38,23 +43,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import umap
+from torch.utils.data import DataLoader, Subset
 
+from src.training.pipeline import EspaceLatent
 from src.training.training import get_model
-
-TARGET_KEY = "z_true"
-LATENT_KEY = "final_latent"
 
 TRAIN_DATASET = "train"
 VALIDATION_DATASET = "validation"
 
-# Directories and data files (no command line arguments).
+                                                         
 RES_DIR = Path("res")
 OUT_DIR = Path("umap_res")
 TRAIN_DATA_PATH = Path("data/epoch_40_train_results.npy")
 VALIDATION_DATA_PATH = Path("data/epoch_40_val_results.npy")
 
-# UMAP / model settings.
-MAX_SAMPLES = 10_000  # per split; set to 0 to use every sample (very slow)
+                        
+MAX_SAMPLES = 10_000
 SEED = 42
 N_NEIGHBORS = 15
 MIN_DIST = 0.1
@@ -67,14 +71,19 @@ PLOT_TITLES = {
     "y_sup": "y_sup (predicted upper bound)",
 }
 
-CENTER_KEY = "center"  # (y_low + y_sup) / 2
-ERROR_KEY = "error"  # y_true - center
-ERROR_CMAP = "RdBu_r"  # diverging, centered on zero
+CENTER_KEY = "center"                       
+ERROR_KEY = "error"                   
+ERROR_CMAP = "RdBu_r"                               
 
 
 @dataclass
 class Split:
-    """A (possibly subsampled) dataset plus the full-split normalization."""
+    """A (possibly subsampled) dataset plus the source :class:`EspaceLatent`.
+
+    ``indices`` maps the (subsampled) latent/target arrays used for UMAP back to
+    the original dataset, so model inference can use the dataset's own
+    ``__getitem__`` normalization.
+    """
 
     name: str
     latent: np.ndarray
@@ -83,6 +92,8 @@ class Split:
     x_max: np.ndarray
     y_min: float
     y_max: float
+    dataset: EspaceLatent
+    indices: np.ndarray
 
     @property
     def x_range(self) -> np.ndarray:
@@ -110,29 +121,31 @@ def _subsample_indices(n_samples: int, max_samples: int, rng: np.random.Generato
 
 
 def load_split(path: str | Path, name: str, max_samples: int = MAX_SAMPLES, seed: int = SEED) -> Split:
-    """Load one ``*_results.npy`` file and subsample it for UMAP."""
-    data = np.load(path, allow_pickle=True).item()
+    """Load one ``*_results.npy`` file with :class:`EspaceLatent`.
 
-    latent = np.asarray(data[LATENT_KEY], dtype=np.float32)
-    target = np.asarray(data[TARGET_KEY], dtype=np.float32)
+    The dataset is kept on the split because it provides the exact
+    normalization (and target denormalization) used at evaluation time.
+    """
+    dataset = EspaceLatent(path)
 
-    valid = np.isfinite(target) & (target > 0)
+    latent = np.asarray(dataset.final_latent, dtype=np.float32)
+    target = np.asarray(dataset.targets, dtype=np.float32)
+
+    valid = np.flatnonzero(np.isfinite(target) & (target > 0))
     if latent.ndim == 2:
-        valid &= np.isfinite(latent).all(axis=1)
-    latent = latent[valid]
-    target = target[valid]
+        valid = valid[np.isfinite(latent[valid]).all(axis=1)]
 
-    if len(target) == 0:
+    if len(valid) == 0:
         raise ValueError(f"No valid samples found in {path}")
 
-    # Normalization is computed on the full split, as EspaceLatent does.
-    x_min = latent.min(axis=0)
-    x_max = latent.max(axis=0)
-    y_min = float(target.min())
-    y_max = float(target.max())
+    x_min = latent[valid].min(axis=0)
+    x_max = latent[valid].max(axis=0)
+    y_min = float(target[valid].min())
+    y_max = float(target[valid].max())
 
     rng = np.random.default_rng(seed)
-    indices = _subsample_indices(len(target), max_samples, rng)
+    picked = _subsample_indices(len(valid), max_samples, rng)
+    indices = valid[picked]
 
     return Split(
         name=name,
@@ -142,15 +155,9 @@ def load_split(path: str | Path, name: str, max_samples: int = MAX_SAMPLES, seed
         x_max=x_max,
         y_min=y_min,
         y_max=y_max,
+        dataset=dataset,
+        indices=indices,
     )
-
-
-def normalized_latent(split: Split, x_min=None, x_max=None) -> np.ndarray:
-    """Min-max normalize latent features to [-1, 1] (training convention)."""
-    x_min = split.x_min if x_min is None else np.asarray(x_min, dtype=np.float32)
-    x_max = split.x_max if x_max is None else np.asarray(x_max, dtype=np.float32)
-    span = _safe_range(x_min, x_max)
-    return 2.0 * (split.latent - x_min) / span - 1.0
 
 
 def load_model(config: dict, pth_path: str | Path, device: torch.device) -> torch.nn.Module:
@@ -166,16 +173,23 @@ def load_model(config: dict, pth_path: str | Path, device: torch.device) -> torc
     return model
 
 
-def predict_interval(model: torch.nn.Module, x: np.ndarray, device: torch.device, batch_size: int = BATCH_SIZE):
-    """Return ``y_low`` / ``y_sup`` predictions (still normalized)."""
+def predict_interval(model: torch.nn.Module, dataset, device: torch.device, batch_size: int = BATCH_SIZE):
+    """Run the model on an :class:`EspaceLatent` (sub)dataset.
+
+    Inputs come from ``dataset[idx]``, so they are normalized exactly as during
+    training evaluation. This also applies to the validation split, whose
+    statistics differ from the training split.
+    """
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     lows = []
     sups = []
     with torch.no_grad():
-        for start in range(0, len(x), batch_size):
-            batch = torch.as_tensor(x[start:start + batch_size], dtype=torch.float32, device=device)
-            low, sup = model(batch)
+        for x, _ in loader:
+            low, sup = model(x.to(device))
             lows.append(low.detach().cpu().numpy().reshape(-1))
             sups.append(sup.detach().cpu().numpy().reshape(-1))
+    if not lows:
+        return np.array([]), np.array([])
     return np.concatenate(lows), np.concatenate(sups)
 
 
@@ -184,18 +198,27 @@ def denormalize(values: np.ndarray, y_min: float, y_range: float) -> np.ndarray:
     return (values + 1.0) / 2.0 * y_range + y_min
 
 
-def compute_umap(train: Split, validation: Split):
-    """Fit UMAP on train + validation so both datasets share one embedding."""
-    combined = np.vstack([train.latent, validation.latent])
+def compute_umap(
+    train: Split,
+    validation: Split,
+    n_neighbors: int = N_NEIGHBORS,
+    min_dist: float = MIN_DIST,
+    seed: int = SEED,
+):
+    """Fit UMAP on the training split and project validation into that space.
+
+    Fitting only on training data avoids leaking validation information into the
+    embedding used for visualization.
+    """
     reducer = umap.UMAP(
-        n_neighbors=N_NEIGHBORS,
-        min_dist=MIN_DIST,
-        random_state=SEED,
+        n_neighbors=n_neighbors,
+        min_dist=min_dist,
+        random_state=seed,
         n_jobs=1,
     )
-    embedding = reducer.fit_transform(combined)
-    n_train = len(train.latent)
-    return embedding[:n_train], embedding[n_train:]
+    train_embedding = reducer.fit_transform(train.latent)
+    validation_embedding = reducer.transform(validation.latent)
+    return train_embedding, validation_embedding
 
 
 def plot_umap_dataset(
@@ -292,14 +315,22 @@ def plot_umap_error(
     return out_path
 
 
-def build_run_values(split: Split, model, device, x_min=None, x_max=None):
-    """Predict the interval for one split and return values in physical units."""
-    x_normal = normalized_latent(split, x_min=x_min, x_max=x_max)
-    y_low_norm, y_sup_norm = predict_interval(model, x_normal, device)
-    y_range = split.y_range
+def build_run_values(split: Split, model, device, batch_size: int = BATCH_SIZE):
+    """Predict the interval for one split and return values in physical units.
+
+    Inference goes through the split's :class:`EspaceLatent` dataset, exactly
+    like the training evaluation loop. The dataset's own ``y_min`` / ``y_range``
+    are used to bring the predicted bounds back to physical units.
+    """
+    subset = Subset(split.dataset, split.indices)
+    y_low_norm, y_sup_norm = predict_interval(model, subset, device, batch_size=batch_size)
+
+    y_min = float(split.dataset.y_min)
+    y_range = _safe_range(y_min, float(split.dataset.y_max))
+
     y_true = split.target.astype(np.float64)
-    y_low = denormalize(y_low_norm, split.y_min, y_range)
-    y_sup = denormalize(y_sup_norm, split.y_min, y_range)
+    y_low = denormalize(y_low_norm, y_min, y_range)
+    y_sup = denormalize(y_sup_norm, y_min, y_range)
     center = (y_low + y_sup) / 2.0
     return {
         "y_true": y_true,
@@ -311,22 +342,72 @@ def build_run_values(split: Split, model, device, x_min=None, x_max=None):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Build UMAP figures for every run stored in res/.")
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=MAX_SAMPLES,
+        help="maximum samples per split used for UMAP (0 = all samples, default: %(default)s)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=SEED,
+        help="seed for subsampling and UMAP (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--n-neighbors",
+        type=int,
+        default=N_NEIGHBORS,
+        help="UMAP number of neighbors (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--min-dist",
+        type=float,
+        default=MIN_DIST,
+        help="UMAP min_dist (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=BATCH_SIZE,
+        help="batch size for model inference (default: %(default)s)",
+    )
+    args = parser.parse_args()
+
+    if args.max_samples < 0:
+        parser.error("--max-samples must be >= 0 (0 = use every sample)")
+    if args.n_neighbors <= 0 or args.batch_size <= 0:
+        parser.error("--n-neighbors and --batch-size must be positive")
+    if args.min_dist < 0:
+        parser.error("--min-dist must be >= 0")
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
     print("Loading train split...")
-    train_split = load_split(TRAIN_DATA_PATH, TRAIN_DATASET)
+    train_split = load_split(
+        TRAIN_DATA_PATH, TRAIN_DATASET, max_samples=args.max_samples, seed=args.seed
+    )
     print("Loading validation split...")
-    validation_split = load_split(VALIDATION_DATA_PATH, VALIDATION_DATASET)
+    validation_split = load_split(
+        VALIDATION_DATA_PATH, VALIDATION_DATASET, max_samples=args.max_samples, seed=args.seed
+    )
     print(
         f"UMAP samples: train={len(train_split.target)}, "
         f"validation={len(validation_split.target)}"
     )
 
-    print("Fitting UMAP on train + validation...")
-    train_embedding, validation_embedding = compute_umap(train_split, validation_split)
+    print("Fitting UMAP on train and projecting validation...")
+    train_embedding, validation_embedding = compute_umap(
+        train_split,
+        validation_split,
+        n_neighbors=args.n_neighbors,
+        min_dist=args.min_dist,
+        seed=args.seed,
+    )
 
     json_files = sorted(RES_DIR.glob("*.json"))
     if not json_files:
@@ -345,25 +426,20 @@ def main():
             results = json.load(handle)
 
         config = results.get("config") or {}
-        normalization = results.get("normalization") or {}
 
         model = None
         try:
             model = load_model(config, pth_path, device)
             print(f"[{run_name}] predicting intervals...")
-            train_values = build_run_values(
-                train_split,
-                model,
-                device,
-                x_min=normalization.get("x_min"),
-                x_max=normalization.get("x_max"),
+            train_values = build_run_values(train_split, model, device, batch_size=args.batch_size)
+            validation_values = build_run_values(
+                validation_split, model, device, batch_size=args.batch_size
             )
-            validation_values = build_run_values(validation_split, model, device)
-        except Exception as exc:  # noqa: BLE001 - keep processing other runs
+        except Exception as exc:                                             
             warnings.warn(f"Skipping {run_name}: could not compute predictions ({exc})")
             continue
         finally:
-            # Release the GPU memory before loading the next run's model.
+                                                                         
             del model
             gc.collect()
             if device.type == "cuda":

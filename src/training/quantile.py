@@ -77,8 +77,8 @@ class BaselineXGBoost:
 
         return self
 
-    # Comme le modèle prédit les 2 bornes d'un seul coup, on obtient un tableau (n, 2) :
-    # colonne 0 = q_low, colonne 1 = q_up
+                                                                                        
+                                         
     def predict(self, X_test: np.ndarray) -> np.ndarray:
         preds = self.model.predict(X_test)
 
@@ -88,7 +88,7 @@ class BaselineXGBoost:
 
 
 if __name__ == "__main__":
-    # Test avec des donnees factices
+                                    
     np.random.seed(42)
     X_train = np.random.rand(1000, 10)
     y_train = X_train.sum(axis=1) + np.random.normal(0, 0.1, 1000)
