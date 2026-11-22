@@ -12,7 +12,7 @@ TEST_SIZE_DEFAULT = 0.2
 
 
 class EspaceLatent(Dataset):
-    def __init__(self, path):
+    def __init__(self, path, stats=None):
         super().__init__()
 
         data: dict = np.load(path, allow_pickle=True).item()
@@ -37,13 +37,21 @@ class EspaceLatent(Dataset):
         x_range = torch.where(x_range < 1e-6, 1.0, x_range)
         y_range = torch.where(y_range < 1e-6, 1.0, y_range)
 
-        self.x_min = x_min
-        self.x_max = x_max
-        self.x_range = x_range
-
-        self.y_min = y_min
-        self.y_max = y_max
-        self.y_range = y_range
+        if stats is None:
+            self.x_min = x_min
+            self.x_max = x_max
+            self.x_range = x_range
+            self.y_min = y_min
+            self.y_max = y_max
+            self.y_range = y_range
+            
+        else:
+            self.x_min = stats["x_min"]
+            self.x_max = stats["x_max"]
+            self.x_range = stats["x_range"]
+            self.y_min = stats["y_min"]
+            self.y_max = stats["y_max"]
+            self.y_range = stats["y_range"]
 
         self.final_latent = self.x
         self.targets = self.y
@@ -59,6 +67,19 @@ class EspaceLatent(Dataset):
         y = 2 * (y - self.y_min) / self.y_range - 1
 
         return x, y
+
+    def get_stats(self):
+        stats = {}
+
+        stats["x_min"] = self.x_min
+        stats["x_max"] = self.x_max
+        stats["x_range"] = self.x_range
+
+        stats["y_min"] = self.y_min
+        stats["y_max"] = self.y_max
+        stats["y_range"] = self.y_range
+
+        return stats
 
     @property
     def min(self):
@@ -76,7 +97,7 @@ class EspaceLatent(Dataset):
 def main_pipeline(batch_size: int, test_size: float = TEST_SIZE_DEFAULT) -> tuple[DataLoader, dict[str, DataLoader]]:
 
     training_dataset = EspaceLatent(TRAINING_DATA_DEFAULT_PATH)
-    validation_dataset = EspaceLatent(VALIDATION_DATA_DEFAULT_PATH)
+    validation_dataset = EspaceLatent(VALIDATION_DATA_DEFAULT_PATH, stats=training_dataset.get_stats())
 
     n_total = len(training_dataset)
     n_test = int(round(n_total * test_size))
