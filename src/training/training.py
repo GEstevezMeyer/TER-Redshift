@@ -1,4 +1,4 @@
-import torch 
+import torch
 from typing import Callable
 import torch.nn as nn 
 import torch.nn.functional as F
@@ -195,6 +195,15 @@ def evaluate_dataset(
 
     all_preds = torch.cat(all_preds, dim=0)
     all_reels = torch.cat(all_reels, dim=0)
+
+    dataset = dataloader.dataset
+    if isinstance(dataset, Subset):
+        dataset = dataset.dataset
+    y_min = dataset.y_min
+    y_range = dataset.y_range
+
+    all_preds = (all_preds + 1) / 2 * y_range + y_min
+    all_reels = (all_reels + 1) / 2 * y_range + y_min
 
     metric = metric_function(all_preds, all_reels)
     width = width_metric(all_preds)
