@@ -12,7 +12,6 @@ class WinklerScore(nn.Module):
 
     def forward(self, pred:list[list[float]], reel:list[float])-> float:
         pred, reel = torch.as_tensor(pred, dtype=torch.float), torch.as_tensor(reel, dtype=torch.float)
-        pred, reel = pred.cpu(), reel.cpu()
         
         reel = reel.reshape(-1)
         if pred.dim() > 2:
@@ -37,8 +36,8 @@ class GeneralMetricsEvaluation(nn.Module):
     def forward(
         self, pred: torch.Tensor | list, target: torch.Tensor | list
     ) -> tuple[float, float, float, float, float]:
-        pred = torch.as_tensor(pred, dtype=torch.float32, device="cpu")
-        target = torch.as_tensor(target, dtype=torch.float32, device="cpu")
+        pred = torch.as_tensor(pred, dtype=torch.float32)
+        target = torch.as_tensor(target, dtype=torch.float32)
 
         target = target.view(-1)
 
@@ -74,8 +73,7 @@ class IntervalWidth(nn.Module):
         super().__init__()
 
     def forward(self, pred: list[list[float]], reel: list[float] = None) -> float:
-        pred = torch.as_tensor(pred, dtype=torch.float)
-        pred = pred.cpu()
+        pred = torch.as_tensor(pred, dtype=torch.float32)
 
         if pred.dim() > 2:
             pred = pred.reshape(pred.shape[0], -1)
@@ -89,5 +87,48 @@ class IntervalWidth(nn.Module):
         return width.mean().item()
 
 
+class SigmaMAD(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, pred: list[list[float]], reel: list[float]) -> float:
+        pred, reel = torch.as_tensor(pred, dtype=torch.float), torch.as_tensor(reel, dtype=torch.float)
+        
+        reel = reel.reshape(-1)
+        if pred.dim() > 2:
+            pred = pred.reshape(pred.shape[0], -1)
+        if pred.dim() == 1:
+            pred = pred.reshape(-1, 2)
+
+        lower = pred[:, 0]
+        upper = pred[:, 1]
+
+        center = (upper + lower)/2
+        err = (center - reel)/(1 + reel)
+        med_err = torch.quantile(err, 0.5)
+        med_abs = torch.quantile(torch.abs(err - med_err), 0.5)
+        mad = 1.4826 * med_abs
+        
+        return mad.item()
 
 
+class Biais(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, pred: list[list[float]], reel: list[float]) -> float:
+        pred, reel = torch.as_tensor(pred, dtype=torch.float), torch.as_tensor(reel, dtype=torch.float)
+
+        reel = reel.reshape(-1)
+        if pred.dim() > 2:
+            pred = pred.reshape(pred.shape[0], -1)
+        if pred.dim() == 1:
+            pred = pred.reshape(-1, 2)
+
+        lower = pred[:, 0]
+        upper = pred[:, 1]
+
+        center = (upper + lower)/2
+        err = (center - reel)/(1 + reel)
+
+        return err.mean().item()

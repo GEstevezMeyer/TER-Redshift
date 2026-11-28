@@ -24,7 +24,7 @@ def test_neurone():
 def test_architecture():
     torch.manual_seed(0)
     arch = MacSumDenseMinMax(MacSumIn=5, MacSumOut=8, output_size=1,
-                             linearStart=8, linearN=2, increment=1)
+                             linearStart=8, linearN=2, increment=1, p_dropout=0.0)
     x_arch = torch.randn(5)
 
     optimizer_arch = torch.optim.Adam(arch.parameters(), lr=0.01)
@@ -49,7 +49,7 @@ def test_architecture_batch():
     torch.manual_seed(0)
     B = 32
     arch = MacSumDenseMinMax(MacSumIn=5, MacSumOut=8, output_size=1,
-                             linearStart=8, linearN=2, increment=1)
+                             linearStart=8, linearN=2, increment=1, p_dropout=0.0)
     x_arch = torch.randn(B, 5)
     target = torch.ones(B, 1)
 

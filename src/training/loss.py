@@ -181,6 +181,34 @@ class SWRMSE_RMSEb(nn.Module):
 
         return loss_per_sample.mean()
 
+class RMSEb(nn.Module):
+    """RMSEb loss for interval predictions.
+
+    Penalises both bounds symmetrically against the target:
+
+        sqrt( ((y_true - y_low)^2 + (y_true - y_sup)^2) / 2 + eps )
+
+    This is the standalone counterpart of the RMSEb term used inside
+    ``SWRMSE_RMSEb`` (same formula), without the inside/outside switch.
+    """
+    def __init__(self, eps: float = 1e-8):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, y_low: Tensor, y_sup: Tensor, y_true: Tensor) -> Tensor:
+        if y_true.dim() == 1:
+            y_true = y_true.unsqueeze(1)
+        if y_low.dim() == 1:
+            y_low = y_low.unsqueeze(1)
+        if y_sup.dim() == 1:
+            y_sup = y_sup.unsqueeze(1)
+
+        rmseb = torch.sqrt(
+            ((y_true - y_low) ** 2 + (y_true - y_sup) ** 2) / 2.0 + self.eps
+        )
+        return rmseb.mean()
+
+
 class WorstBound_RMSE(nn.Module): 
     def __init__(self,eps):
         super().__init__()

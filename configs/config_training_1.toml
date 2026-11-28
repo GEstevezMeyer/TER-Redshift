@@ -1,4 +1,5 @@
 [model]
+model_name = "ArchitectureMacSum"
 input_shape = 1024
 lis_MacSumOut = [128, 64, 32]
 lis_output_size = [32, 16, 1]
@@ -6,7 +7,7 @@ lis_activation = ["leaky_relu", "leaky_relu", "leaky_relu"]
 lis_increments = [2, 1, 1]
 lis_linears_start = [128, 32, 16]
 lis_LinearN = [3, 2, 1]
-
+p_dropout = 0.0
 
 [training]
 [training.optimizer]
